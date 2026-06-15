@@ -282,6 +282,7 @@ def get_player_fixtures(squad_id, round_id, store):
             
             fixtures.append({
                 "opp_abbr": store.squad_abbr(opp_id),
+                "opp_name": store.squad_name(opp_id),
                 "is_home": is_home,
                 "status": status,
                 "is_live": is_live,

@@ -1025,7 +1025,7 @@
                         if (f.is_done) badgeCls = 'done';
                         else if (f.is_live) badgeCls = 'live';
                         const label = `${esc(f.opp_abbr)}`;
-                        const titleText = f.is_live ? 'Live Match' : (f.is_done ? 'Match Completed' : 'Upcoming Match');
+                        const titleText = esc(f.opp_name || '');
                         return `<span class="fix-badge ${badgeCls}" title="${titleText}">${label}</span>`;
                     }).join(' ');
                 } else {
