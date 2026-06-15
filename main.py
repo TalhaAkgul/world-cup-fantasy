@@ -195,6 +195,17 @@ class DataStore:
     def player_round_points(self, pid, round_id):
         stats = (self.players.get(pid) or {}).get("stats") or {}
         rp = stats.get("roundPoints") or []
+        if isinstance(rp, dict):
+            for k in (str(round_id), int(round_id)):
+                if k in rp:
+                    val = rp[k]
+                    if isinstance(val, dict):
+                        for sub_k in ("points", "value", "total", "p"):
+                            if sub_k in val:
+                                return val[sub_k]
+                    return val
+            return None
+
         for item in rp:
             if isinstance(item, dict):
                 rid = item.get("roundId", item.get("round", item.get("id")))
@@ -248,6 +259,37 @@ def fetch_team(round_id, user_id, cookie):
     return data.get("success")
 
 
+def get_player_fixtures(squad_id, round_id, store):
+    fixtures = []
+    if not squad_id:
+        return fixtures
+    target_round = None
+    for r in store.rounds:
+        if r.get("id") == round_id:
+            target_round = r
+            break
+    if not target_round:
+        return fixtures
+
+    for match in _get_round_matches(target_round):
+        home_id, away_id = _get_match_teams(match)
+        if home_id == squad_id or away_id == squad_id:
+            is_home = (home_id == squad_id)
+            opp_id = away_id if is_home else home_id
+            status = (match.get("status") or "").lower()
+            is_live = status in ('playing', 'live', 'inprogress')
+            is_done = status in ('complete', 'completed', 'full_time')
+            
+            fixtures.append({
+                "opp_abbr": store.squad_abbr(opp_id),
+                "is_home": is_home,
+                "status": status,
+                "is_live": is_live,
+                "is_done": is_done
+            })
+    return fixtures
+
+
 def build_squad_rows(team, store, round_id):
     captain = team.get("captain")
     vice = team.get("vice")
@@ -259,16 +301,18 @@ def build_squad_rows(team, store, round_id):
     def make_row(pid, starter):
         p = store.player(pid)
         role = "C" if pid == captain else ("V" if pid == vice else "")
+        squad_id = p.get("squadId")
         return {
             "pid": pid,
             "pos": p.get("position", "?"),
             "name": store.player_name(pid),
-            "country": store.squad_abbr(p.get("squadId")),
+            "country": store.squad_abbr(squad_id),
             "price": p.get("price"),
             "points": store.player_round_points(pid, round_id),
             "total": store.player_total_points(pid),
             "role": role,
             "starter": starter,
+            "fixtures": get_player_fixtures(squad_id, round_id, store),
         }
 
     for pos in POS_ORDER:

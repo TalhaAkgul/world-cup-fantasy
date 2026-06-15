@@ -529,6 +529,38 @@
             font-weight: 700;
         }
 
+        .fix-badge {
+            font-size: 10px;
+            padding: 2px 5px;
+            border-radius: 4px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            display: inline-block;
+            font-weight: 600;
+        }
+
+        .fix-badge.done {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--muted);
+            border-color: rgba(255, 255, 255, 0.08);
+            font-weight: 400;
+            text-decoration: line-through;
+        }
+
+        .fix-badge.live {
+            background: rgba(0, 212, 106, 0.15);
+            color: var(--live);
+            border-color: var(--live);
+            animation: pulse 1.5s infinite;
+        }
+
+        .fix-badge.upcoming {
+            background: rgba(240, 165, 0, 0.08);
+            color: var(--gold);
+            border-color: rgba(240, 165, 0, 0.3);
+        }
+
         .no-owner {
             color: var(--muted);
             font-size: 11px;
@@ -974,21 +1006,37 @@
 
             meta.textContent = `GW pts: ${team.roundPoints ?? '—'}  •  Overall: ${team.overallPoints ?? '—'}  •  Squad value: ${team.value ?? '—'}`;
 
-            let html = '<table id="squad-table"><thead><tr><th>Pos</th><th>Player</th><th>Cty</th><th>Price</th><th style="text-align:right">GW</th><th style="text-align:right">Total</th><th>Role</th></tr></thead><tbody>';
+            let html = '<table id="squad-table"><thead><tr><th>Pos</th><th>Player</th><th>Cty</th><th>Opp</th><th>Price</th><th style="text-align:right">GW</th><th style="text-align:right">Total</th><th>Role</th></tr></thead><tbody>';
 
             let benchStarted = false;
-            html += `<tr class="section-row"><td colspan="7">⚡ Starting XI</td></tr>`;
+            html += `<tr class="section-row"><td colspan="8">⚡ Starting XI</td></tr>`;
 
             team.rows.forEach(r => {
                 if (!r.starter && !benchStarted) {
-                    html += `<tr class="section-row"><td colspan="7">🪑 Bench</td></tr>`;
+                    html += `<tr class="section-row"><td colspan="8">🪑 Bench</td></tr>`;
                     benchStarted = true;
                 }
                 const cls = !r.starter ? 'bench-row' : (r.role === 'C' ? 'captain-row' : '');
+                
+                let fixHtml = '';
+                if (r.fixtures && r.fixtures.length) {
+                    fixHtml = r.fixtures.map(f => {
+                        let badgeCls = 'upcoming';
+                        if (f.is_done) badgeCls = 'done';
+                        else if (f.is_live) badgeCls = 'live';
+                        const label = `${esc(f.opp_abbr)}`;
+                        const titleText = f.is_live ? 'Live Match' : (f.is_done ? 'Match Completed' : 'Upcoming Match');
+                        return `<span class="fix-badge ${badgeCls}" title="${titleText}">${label}</span>`;
+                    }).join(' ');
+                } else {
+                    fixHtml = '<span class="no-owner">—</span>';
+                }
+
                 html += `<tr class="${cls}">
       <td><span class="pos-badge pos-${r.pos}">${r.pos}</span></td>
       <td>${esc(r.name)}</td>
       <td>${esc(r.country)}</td>
+      <td>${fixHtml}</td>
       <td>${r.price ?? '—'}</td>
       <td class="pts-cell${(r.points || 0) >= 10 ? ' good' : ''}">${r.points ?? '—'}</td>
       <td class="pts-cell">${r.total ?? '—'}</td>
