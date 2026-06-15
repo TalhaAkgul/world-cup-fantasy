@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FIFA Fantasy Tracker</title>
+    <style>
+        :root {
+            --bg: #0a1628;
+            --surface: #112040;
+            --card: #1a2f55;
+            --border: #2a4080;
+            --gold: #f0a500;
+            --gold-dim: #c07800;
+            --text: #d8e8ff;
+            --muted: #7090b8;
+            --live: #00d46a;
+            --bench: #556688;
+            --gk: #e0a030;
+            --def: #3080e0;
+            --mid: #20c060;
+            --fwd: #e03030;
+            --radius: 8px;
+            --shadow: 0 4px 16px rgba(0, 0, 0, .5);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 14px;
+            min-height: 100vh;
+        }
+
+        /* ---- header ---- */
+        header {
+            background: linear-gradient(135deg, #061020 0%, #0d2040 100%);
+            border-bottom: 2px solid var(--gold);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        header h1 {
+            font-size: 20px;
+            color: var(--gold);
+            letter-spacing: .5px;
+        }
+
+        header h1 span {
+            color: var(--text);
+            font-weight: 400;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        #status-pill {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+        }
+
+        #status-pill.live {
+            border-color: var(--live);
+            color: var(--live);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .6
+            }
+        }
+
+
+
+        /* ---- tabs ---- */
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border);
+            padding: 0 20px;
+            margin-top: 12px;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--muted);
+            padding: 10px 22px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: color .2s, border-color .2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--text);
+        }
+
+        .tab-btn.active {
+            color: var(--gold);
+            border-bottom-color: var(--gold);
+        }
+
+        /* ---- common controls ---- */
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            padding: 14px 20px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .controls label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .controls select,
+        .controls input[type=number] {
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 10px;
+            border-radius: var(--radius);
+            font-size: 13px;
+        }
+
+        .btn {
+            background: var(--gold);
+            color: #000;
+            border: none;
+            padding: 7px 16px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            transition: background .15s;
+        }
+
+        .btn:hover {
+            background: #ffc030;
+        }
+
+        .btn:disabled {
+            background: var(--border);
+            color: var(--muted);
+            cursor: not-allowed;
+        }
+
+        .btn-outline {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 6px 14px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .btn-outline:hover {
+            border-color: var(--gold);
+            color: var(--gold);
+        }
+
+        /* ---- tab content ---- */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* ============================
+     LEAGUE TAB
+     ============================ */
+        #tab-league .split {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            height: calc(100vh - 200px);
+            overflow: hidden;
+        }
+
+        #league-panel {
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+        }
+
+        #squad-panel {
+            overflow-y: auto;
+            padding: 16px 20px;
+        }
+
+        .panel-hdr {
+            padding: 10px 14px;
+            font-weight: 700;
+            font-size: 13px;
+            color: var(--gold);
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        /* league table */
+        #league-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #league-table th {
+            padding: 8px 10px;
+            text-align: left;
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            background: var(--surface);
+        }
+
+        #league-table td {
+            padding: 9px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        #league-table tr:hover td {
+            background: var(--card);
+            cursor: pointer;
+        }
+
+        #league-table tr.selected td {
+            background: rgba(240, 165, 0, .12);
+        }
+
+        .rank-badge {
+            font-weight: 700;
+            color: var(--gold);
+        }
+
+        /* squad */
+        #squad-header h2 {
+            font-size: 17px;
+            margin-bottom: 4px;
+        }
+
+        #squad-meta {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 14px;
+        }
+
+        #squad-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #squad-table th {
+            padding: 7px 8px;
+            text-align: left;
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            background: var(--surface);
+            position: sticky;
+            top: 0;
+        }
+
+        #squad-table td {
+            padding: 8px 8px;
+            border-bottom: 1px solid rgba(42, 64, 128, .5);
+        }
+
+        #squad-table .section-row td {
+            background: var(--surface);
+            font-weight: 700;
+            font-size: 11px;
+            color: var(--gold);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 5px 8px;
+        }
+
+        #squad-table .bench-row td {
+            color: var(--bench);
+        }
+
+        #squad-table .captain-row td {
+            font-weight: 700;
+        }
+
+        /* ============================
+     MATCH VIEW TAB
+     ============================ */
+        #match-view-body {
+            padding: 16px 20px;
+        }
+
+        .date-group {
+            margin-bottom: 30px;
+        }
+
+        .date-label {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--gold);
+            padding: 8px 14px;
+            background: var(--surface);
+            border-radius: var(--radius);
+            border-left: 4px solid var(--gold);
+            margin-bottom: 14px;
+        }
+
+        .hour-group {
+            margin-bottom: 18px;
+        }
+
+        .hour-label {
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 600;
+            padding: 4px 0 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .hour-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .match-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 14px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .match-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .match-title {
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .match-title .vs {
+            color: var(--muted);
+            margin: 0 8px;
+            font-weight: 400;
+        }
+
+        .match-title .score {
+            color: var(--gold);
+            margin-left: 10px;
+        }
+
+        .match-status {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 20px;
+            background: var(--border);
+        }
+
+        .match-status.live {
+            background: var(--live);
+            color: #000;
+            animation: pulse 1.5s infinite;
+        }
+
+        .match-status.completed {
+            background: #334;
+            color: var(--muted);
+        }
+
+        .match-toggle {
+            color: var(--muted);
+            font-size: 18px;
+            transition: transform .2s;
+        }
+
+        .match-card.collapsed .match-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .match-body {
+            display: block;
+        }
+
+        .match-card.collapsed .match-body {
+            display: none;
+        }
+
+        /* player table inside match */
+        .squad-section {
+            padding: 0 8px 8px;
+        }
+
+        .squad-name {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 10px 8px 4px;
+        }
+
+        .player-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .player-table th {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--muted);
+            padding: 4px 8px;
+            text-align: left;
+        }
+
+        .player-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(42, 64, 128, .3);
+        }
+
+        .player-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .player-table tr:hover td {
+            background: rgba(255, 255, 255, .03);
+        }
+
+        .pos-badge {
+            display: inline-block;
+            width: 34px;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 0;
+            border-radius: 4px;
+            letter-spacing: .5px;
+        }
+
+        .pos-GK {
+            background: rgba(224, 160, 48, .25);
+            color: var(--gk);
+        }
+
+        .pos-DEF {
+            background: rgba(48, 128, 224, .25);
+            color: var(--def);
+        }
+
+        .pos-MID {
+            background: rgba(32, 192, 96, .25);
+            color: var(--mid);
+        }
+
+        .pos-FWD {
+            background: rgba(224, 48, 48, .25);
+            color: var(--fwd);
+        }
+
+        .owners-list {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .owner-badge {
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 12px;
+            background: rgba(240, 165, 0, .15);
+            color: var(--gold);
+            border: 1px solid var(--gold-dim);
+        }
+
+        .no-owner {
+            color: var(--muted);
+            font-size: 11px;
+            font-style: italic;
+        }
+
+        .pts-cell {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .pts-cell.good {
+            color: var(--live);
+            font-weight: 700;
+        }
+
+        /* ============================
+     MOST PICKED TAB
+     ============================ */
+        #most-picked-body {
+            padding: 16px 20px;
+        }
+
+        #mp-summary {
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        #most-picked-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #most-picked-table th {
+            padding: 8px 10px;
+            text-align: left;
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            background: var(--surface);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        #most-picked-table td {
+            padding: 9px 10px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+
+        #most-picked-table tr:hover td {
+            background: var(--card);
+        }
+
+        .mp-rank {
+            font-weight: 700;
+            color: var(--gold);
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .mp-pick {
+            min-width: 160px;
+        }
+
+        .mp-pick-bar {
+            height: 16px;
+            background: var(--surface);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid var(--border);
+        }
+
+        .mp-pick-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+            border-radius: 8px;
+        }
+
+        .mp-pick-label {
+            font-size: 11px;
+            color: var(--text);
+            margin-top: 3px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .mp-owners {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            max-width: 420px;
+        }
+
+        /* ---- misc ---- */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 10px 16px;
+            border-radius: var(--radius);
+            font-size: 13px;
+            box-shadow: var(--shadow);
+            opacity: 0;
+            transition: opacity .3s;
+            pointer-events: none;
+            z-index: 99;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
+
+        .toast.err {
+            border-color: #e03030;
+            color: #e06060;
+        }
+
+        .loader {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+        }
+
+        .loader::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--gold);
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--muted);
+        }
+
+        .empty p {
+            margin-top: 8px;
+            font-size: 13px;
+        }
+
+        #auto-refresh-badge {
+            font-size: 11px;
+            color: var(--live);
+            border: 1px solid var(--live);
+            padding: 3px 8px;
+            border-radius: 20px;
+            display: none;
+        }
+
+        #auto-refresh-badge.visible {
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }
+
+        @media (max-width: 720px) {
+            #tab-league .split {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+
+            #league-panel {
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+                max-height: 300px;
+            }
+
+
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>⚽ FIFA Fantasy <span>Tracker</span></h1>
+        <div class="header-right">
+            <span id="status-pill">Loading…</span>
+            <button class="btn-outline" onclick="manualRefresh()">↺ Refresh feeds</button>
+        </div>
+    </header>
+
+
+
+    <!-- ===== TABS ===== -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('league')">📊 League Tracker</button>
+        <button class="tab-btn" onclick="switchTab('matches')">🗓 Match View</button>
+        <button class="tab-btn" onclick="switchTab('picked')">🔥 Most Picked</button>
+    </div>
+
+    <!-- ===================================================
+     TAB 1: LEAGUE TRACKER
+     =================================================== -->
+    <div id="tab-league" class="tab-content active">
+        <div class="controls">
+            <label>Gameweek
+                <select id="round-select" style="width:190px">
+                    <option value="">— select —</option>
+                </select>
+            </label>
+            <button class="btn" id="load-league-btn" onclick="loadLeague()">Load League</button>
+        </div>
+
+        <div class="split">
+            <!-- left: league table -->
+            <div id="league-panel">
+                <div class="panel-hdr">League Table</div>
+                <div id="league-content">
+                    <div class="empty">
+                        <div style="font-size:32px">📋</div>
+                        <p>Select a round and press <strong>Load League</strong></p>
+                    </div>
+                </div>
+            </div>
+            <!-- right: squad detail -->
+            <div id="squad-panel">
+                <div id="squad-header" style="display:none">
+                    <h2 id="squad-title"></h2>
+                    <div id="squad-meta"></div>
+                </div>
+                <div id="squad-content">
+                    <div class="empty">
+                        <div style="font-size:32px">👤</div>
+                        <p>Click a manager to see their squad</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================
+     TAB 2: MATCH VIEW
+     =================================================== -->
+    <div id="tab-matches" class="tab-content">
+        <div class="controls">
+            <label>Gameweek
+                <select id="mv-round-select" style="width:190px">
+                    <option value="">All rounds</option>
+                </select>
+            </label>
+            <button class="btn" onclick="loadMatchView()">Load Match View</button>
+            <span id="auto-refresh-badge">⚡ Live auto-refresh</span>
+        </div>
+        <div id="match-view-body">
+            <div class="empty">
+                <div style="font-size:40px">⚽</div>
+                <p>Press <strong>Load Match View</strong> to see players grouped by match and time</p>
+                <p style="margin-top:6px;font-size:12px;color:var(--muted)">Requires server-side cookie configuration to show which manager owns
+                    each player</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================
+     TAB 3: MOST PICKED
+     =================================================== -->
+    <div id="tab-picked" class="tab-content">
+        <div class="controls">
+            <label>Gameweek
+                <select id="mp-round-select" style="width:190px">
+                    <option value="">Current round</option>
+                </select>
+            </label>
+            <button class="btn" onclick="loadMostPicked()">Load Most Picked</button>
+            <input type="text" id="mp-search" placeholder="Filter players…"
+                style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:var(--radius);font-size:13px"
+                oninput="renderMostPicked()">
+        </div>
+        <div id="most-picked-body">
+            <div class="empty">
+                <div style="font-size:40px">🔥</div>
+                <p>Press <strong>Load Most Picked</strong> to see every player ranked by how many managers picked them</p>
+                <p style="margin-top:6px;font-size:12px;color:var(--muted)">Requires server-side cookie configuration</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== TOAST ===== -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // ---------------------------------------------------------------------------
+        // State
+        // ---------------------------------------------------------------------------
+        let rounds = [];
+        let leagueData = null;
+        let selectedManagerId = null;
+        let autoRefreshInterval = null;
+        let mostPickedData = null;
+
+        // ---------------------------------------------------------------------------
+        // Init
+        // ---------------------------------------------------------------------------
+        async function init() {
+            const status = await fetchJson('/api/status');
+            if (!status) return;
+
+            updateStatusPill(status);
+
+            rounds = await fetchJson('/api/rounds') || [];
+            populateRoundSelects(rounds, status.current_round_id);
+
+            // Load saved cookie hint
+            if (status.players > 0) {
+                document.getElementById('status-pill').textContent =
+                    `${status.players.toLocaleString()} players • ${status.rounds} rounds • ${status.last_refresh || ''}`;
+            }
+        }
+
+        function updateStatusPill(status) {
+            const pill = document.getElementById('status-pill');
+            if (status.is_match_hours) {
+                pill.textContent = '⚡ LIVE';
+                pill.className = 'live';
+            } else {
+                pill.className = '';
+                pill.textContent = status.ready ? `Ready • ${status.last_refresh || ''}` : 'Loading…';
+            }
+        }
+
+        function populateRoundSelects(rounds, currentId) {
+            const placeholders = {
+                'round-select': '',
+                'mv-round-select': '<option value="">All rounds</option>',
+                'mp-round-select': '<option value="">Current round</option>',
+            };
+            Object.keys(placeholders).forEach(id => {
+                const sel = document.getElementById(id);
+                sel.innerHTML = placeholders[id];
+                rounds.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.id;
+                    opt.textContent = `GW ${r.id}${r.status ? '  (' + r.status + ')' : ''}`;
+                    if (r.id === currentId) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+            });
+        }
+
+        // ---------------------------------------------------------------------------
+        // Tabs
+        // ---------------------------------------------------------------------------
+        function switchTab(name) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-' + name).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+
+        async function manualRefresh() {
+            await fetchJson('/api/refresh', 'POST', {});
+            showToast('Refreshing static data…');
+            setTimeout(async () => {
+                const s = await fetchJson('/api/status');
+                if (s) updateStatusPill(s);
+            }, 3000);
+        }
+
+        // ---------------------------------------------------------------------------
+        // League tab
+        // ---------------------------------------------------------------------------
+        async function loadLeague() {
+            const roundId = document.getElementById('round-select').value;
+            if (!roundId) { showToast('Pick a gameweek first', true); return; }
+
+            document.getElementById('league-content').innerHTML = '<div class="loader">Loading league</div>';
+            document.getElementById('squad-content').innerHTML = '';
+            document.getElementById('squad-header').style.display = 'none';
+            selectedManagerId = null;
+            leagueData = null;
+
+            const data = await fetchJson(`/api/league?round_id=${roundId}`);
+            if (!data) return;
+            if (data.error) { showToast(data.error, true); document.getElementById('league-content').innerHTML = `<div class="empty"><p>${data.error}</p></div>`; return; }
+
+            leagueData = data;
+            renderLeagueTable(data.managers, data.teams, parseInt(roundId));
+        }
+
+        function renderLeagueTable(managers, teams, roundId) {
+            const sorted = [...managers].sort((a, b) => (a.overallRank || 999) - (b.overallRank || 999));
+            let html = `<table id="league-table"><thead><tr>
+    <th>#</th><th>Manager</th><th style="text-align:right">GW</th><th style="text-align:right">Total</th>
+  </tr></thead><tbody>`;
+            sorted.forEach(m => {
+                const team = teams[m.userId];
+                const gw = team ? team.roundPoints : m.roundPoints;
+                const total = team ? team.overallPoints : m.overallPoints;
+                html += `<tr data-uid="${m.userId}" onclick="showManagerSquad(${m.userId})">
+      <td><span class="rank-badge">${m.overallRank || '—'}</span></td>
+      <td>${esc(m.userName || '')}</td>
+      <td class="pts-cell">${gw ?? '—'}</td>
+      <td class="pts-cell">${total ?? '—'}</td>
+    </tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('league-content').innerHTML = html;
+        }
+
+        function showManagerSquad(userId) {
+            if (!leagueData) return;
+            const team = leagueData.teams[userId];
+            const mgr = leagueData.managers.find(m => m.userId === userId);
+            selectedManagerId = userId;
+
+            // highlight row
+            document.querySelectorAll('#league-table tr').forEach(r => r.classList.remove('selected'));
+            document.querySelector(`#league-table tr[data-uid="${userId}"]`)?.classList.add('selected');
+
+            const hdr = document.getElementById('squad-header');
+            const title = document.getElementById('squad-title');
+            const meta = document.getElementById('squad-meta');
+            const content = document.getElementById('squad-content');
+
+            hdr.style.display = 'block';
+            title.textContent = mgr?.userName || `User ${userId}`;
+
+            if (!team) {
+                meta.textContent = 'No team data for this round';
+                content.innerHTML = '';
+                return;
+            }
+
+            meta.textContent = `GW pts: ${team.roundPoints ?? '—'}  •  Overall: ${team.overallPoints ?? '—'}  •  Squad value: ${team.value ?? '—'}`;
+
+            let html = '<table id="squad-table"><thead><tr><th>Pos</th><th>Player</th><th>Cty</th><th>Price</th><th style="text-align:right">GW</th><th style="text-align:right">Total</th><th>Role</th></tr></thead><tbody>';
+
+            let benchStarted = false;
+            html += `<tr class="section-row"><td colspan="7">⚡ Starting XI</td></tr>`;
+
+            team.rows.forEach(r => {
+                if (!r.starter && !benchStarted) {
+                    html += `<tr class="section-row"><td colspan="7">🪑 Bench</td></tr>`;
+                    benchStarted = true;
+                }
+                const cls = !r.starter ? 'bench-row' : (r.role === 'C' ? 'captain-row' : '');
+                html += `<tr class="${cls}">
+      <td><span class="pos-badge pos-${r.pos}">${r.pos}</span></td>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.country)}</td>
+      <td>${r.price ?? '—'}</td>
+      <td class="pts-cell${(r.points || 0) >= 10 ? ' good' : ''}">${r.points ?? '—'}</td>
+      <td class="pts-cell">${r.total ?? '—'}</td>
+      <td>${r.role ? `<strong>${r.role}</strong>` : ''}</td>
+    </tr>`;
+            });
+
+            html += '</tbody></table>';
+            content.innerHTML = html;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Match View tab
+        // ---------------------------------------------------------------------------
+        async function loadMatchView() {
+            const roundId = document.getElementById('mv-round-select').value;
+            const body = document.getElementById('match-view-body');
+            body.innerHTML = '<div class="loader">Loading match view (fetching all teams…)</div>';
+
+            const data = await fetchJson(`/api/match-view?round_id=${roundId}`);
+            if (!data) return;
+            if (data.error) { showToast(data.error, true); body.innerHTML = `<div class="empty"><p>${data.error}</p></div>`; return; }
+
+            renderMatchView(data);
+            setupMatchAutoRefresh(data.is_match_hours, roundId);
+        }
+
+        function renderMatchView(data) {
+            const body = document.getElementById('match-view-body');
+            const badge = document.getElementById('auto-refresh-badge');
+            badge.classList.toggle('visible', data.is_match_hours);
+
+            if (!data.groups || data.groups.length === 0) {
+                body.innerHTML = '<div class="empty"><div style="font-size:40px">📭</div><p>No matches found for this selection</p></div>';
+                return;
+            }
+
+            let html = '';
+            data.groups.forEach(dateGroup => {
+                html += `<div class="date-group">
+      <div class="date-label">📅 ${esc(dateGroup.label)}</div>`;
+
+                dateGroup.hours.forEach(hourGroup => {
+                    html += `<div class="hour-group">
+        <div class="hour-label">🕐 ${esc(hourGroup.time)} TRT</div>`;
+
+                    hourGroup.matches.forEach((match, mi) => {
+                        const st = (match.status || '').toLowerCase();
+                        const isLive = st === 'playing' || st === 'live' || st === 'inprogress';
+                        const isDone = st === 'complete' || st === 'completed' || st === 'full_time';
+                        const statusCls = isLive ? 'live' : (isDone ? 'completed' : '');
+                        const statusLabel = isLive ? '🔴 LIVE' : (isDone ? 'FT' : (match.status || 'Upcoming'));
+                        const scoreStr = (match.score_home != null && match.score_away != null)
+                            ? `<span class="score">${match.score_home} – ${match.score_away}</span>` : '';
+                        const uid = `match-${dateGroup.date}-${hourGroup.time}-${mi}`.replace(/[^a-z0-9-]/gi, '_');
+
+                        html += `<div class="match-card" id="${uid}">
+          <div class="match-header" onclick="toggleMatch('${uid}')">
+            <div class="match-title">
+              ${esc(match.home_name)} <span class="vs">vs</span> ${esc(match.away_name)}
+              ${scoreStr}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="match-status ${statusCls}">${statusLabel}</span>
+              <span class="match-toggle">▾</span>
+            </div>
+          </div>
+          <div class="match-body">`;
+
+                        // Render home squad then away squad (backend sets squadId per player)
+                        [
+                            { id: match.home_id, name: match.home_name },
+                            { id: match.away_id, name: match.away_name },
+                        ].forEach(squad => {
+                            const players = match.players.filter(p => p.squadId === squad.id);
+                            if (players.length === 0) return;
+                            const name = squad.name;
+
+                            html += `<div class="squad-section">
+            <div class="squad-name">${esc(name)}</div>
+            <table class="player-table">
+              <thead><tr>
+                <th>Pos</th><th>Player</th><th>Price</th>
+                <th style="text-align:right">GW Pts</th><th style="text-align:right">Total</th>
+                <th>Managers</th>
+              </tr></thead><tbody>`;
+
+                            players.forEach(p => {
+                                const ownersHtml = p.owners && p.owners.length
+                                    ? p.owners.map(o => `<span class="owner-badge">${esc(o)}</span>`).join('')
+                                    : (data.has_owners ? `<span class="no-owner">—</span>` : '');
+                                html += `<tr>
+              <td><span class="pos-badge pos-${p.pos}">${p.pos}</span></td>
+              <td>${esc(p.name)}</td>
+              <td>${p.price ?? '—'}</td>
+              <td class="pts-cell${(p.gwPts || 0) >= 8 ? ' good' : ''}">${p.gwPts ?? '—'}</td>
+              <td class="pts-cell">${p.totalPts ?? '—'}</td>
+              <td><div class="owners-list">${ownersHtml}</div></td>
+            </tr>`;
+                            });
+
+                            html += '</tbody></table></div>';
+                        });
+
+                        html += '</div></div>'; // match-body, match-card
+                    });
+
+                    html += '</div>'; // hour-group
+                });
+
+                html += '</div>'; // date-group
+            });
+
+            body.innerHTML = html;
+
+            // Collapse completed matches by default if there are many
+            document.querySelectorAll('.match-card').forEach(card => {
+                const status = card.querySelector('.match-status');
+                if (status && status.classList.contains('completed')) {
+                    card.classList.add('collapsed');
+                }
+            });
+        }
+
+        function toggleMatch(uid) {
+            document.getElementById(uid)?.classList.toggle('collapsed');
+        }
+
+        function setupMatchAutoRefresh(isMatchHours, roundId) {
+            clearInterval(autoRefreshInterval);
+            if (!isMatchHours) return;
+            autoRefreshInterval = setInterval(async () => {
+                const data = await fetchJson(`/api/match-view?round_id=${roundId}`);
+                if (data && !data.error) {
+                    renderMatchView(data);
+                    if (!data.is_match_hours) clearInterval(autoRefreshInterval);
+                }
+            }, 60000);
+        }
+
+        // ---------------------------------------------------------------------------
+        // Most Picked tab
+        // ---------------------------------------------------------------------------
+        async function loadMostPicked() {
+            const roundId = document.getElementById('mp-round-select').value;
+            const body = document.getElementById('most-picked-body');
+            body.innerHTML = '<div class="loader">Loading most picked (fetching all teams…)</div>';
+            mostPickedData = null;
+
+            const data = await fetchJson(`/api/most-picked?round_id=${roundId}`);
+            if (!data) return;
+            if (data.error) { showToast(data.error, true); body.innerHTML = `<div class="empty"><p>${data.error}</p></div>`; return; }
+
+            mostPickedData = data;
+            renderMostPicked();
+        }
+
+        function renderMostPicked() {
+            const body = document.getElementById('most-picked-body');
+            if (!mostPickedData) return;
+
+            const total = mostPickedData.total_managers || 0;
+            const filter = document.getElementById('mp-search').value.trim().toLowerCase();
+            let players = mostPickedData.players;
+            if (filter) {
+                players = players.filter(p =>
+                    p.name.toLowerCase().includes(filter) ||
+                    (p.country || '').toLowerCase().includes(filter) ||
+                    p.owners.some(o => o.toLowerCase().includes(filter)));
+            }
+
+            if (!players.length) {
+                body.innerHTML = '<div class="empty"><div style="font-size:40px">📭</div><p>No picked players found</p></div>';
+                return;
+            }
+
+            const maxCount = mostPickedData.players[0]?.count || 1;
+
+            let html = `<div id="mp-summary">GW ${mostPickedData.round_id} • ${mostPickedData.players.length} unique players picked across ${total} managers</div>`;
+            html += `<table id="most-picked-table"><thead><tr>
+        <th style="text-align:right">#</th><th>Pos</th><th>Player</th><th>Cty</th>
+        <th>Picked by</th><th>Price</th>
+        <th style="text-align:right">GW</th><th style="text-align:right">Total</th>
+        <th>Managers</th>
+      </tr></thead><tbody>`;
+
+            players.forEach((p, i) => {
+                const pct = total ? Math.round(p.count / total * 100) : 0;
+                const barW = Math.round(p.count / maxCount * 100);
+                const ownersHtml = p.owners.map(o => `<span class="owner-badge">${esc(o)}</span>`).join('');
+                html += `<tr>
+        <td class="mp-rank">${i + 1}</td>
+        <td><span class="pos-badge pos-${p.pos}">${esc(p.pos)}</span></td>
+        <td>${esc(p.name)}</td>
+        <td>${esc(p.country)}</td>
+        <td class="mp-pick">
+          <div class="mp-pick-bar"><div class="mp-pick-fill" style="width:${barW}%"></div></div>
+          <div class="mp-pick-label">${p.count} / ${total} (${pct}%)</div>
+        </td>
+        <td>${p.price ?? '—'}</td>
+        <td class="pts-cell${(p.gwPts || 0) >= 8 ? ' good' : ''}">${p.gwPts ?? '—'}</td>
+        <td class="pts-cell">${p.totalPts ?? '—'}</td>
+        <td><div class="mp-owners">${ownersHtml}</div></td>
+      </tr>`;
+            });
+
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Helpers
+        // ---------------------------------------------------------------------------
+        async function fetchJson(url, method = 'GET', body = null) {
+            try {
+                const opts = { method, headers: { 'Content-Type': 'application/json' } };
+                if (body) opts.body = JSON.stringify(body);
+                const res = await fetch(url, opts);
+                return await res.json();
+            } catch (e) {
+                showToast(`Error: ${e.message}`, true);
+                return null;
+            }
+        }
+
+        function esc(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function showToast(msg, isErr = false) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast show' + (isErr ? ' err' : '');
+            clearTimeout(t._hide);
+            t._hide = setTimeout(() => t.classList.remove('show'), 3500);
+        }
+
+        // ---------------------------------------------------------------------------
+        init();
+    </script>
+</body>
+
+</html>
