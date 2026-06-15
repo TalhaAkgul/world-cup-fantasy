@@ -1007,7 +1007,7 @@
             let playersLeft = 0;
             if (team.rows) {
                 team.rows.forEach(r => {
-                    if (r.starter && r.fixtures && r.fixtures.length > 0) {
+                    if (r.fixtures && r.fixtures.length > 0) {
                         const playedOrPlaying = r.fixtures.some(f => f.is_done || f.is_live);
                         if (!playedOrPlaying) {
                             playersLeft++;
