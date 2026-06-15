@@ -1004,7 +1004,19 @@
                 return;
             }
 
-            meta.textContent = `GW pts: ${team.roundPoints ?? '—'}  •  Overall: ${team.overallPoints ?? '—'}  •  Squad value: ${team.value ?? '—'}`;
+            let playersLeft = 0;
+            if (team.rows) {
+                team.rows.forEach(r => {
+                    if (r.starter && r.fixtures && r.fixtures.length > 0) {
+                        const playedOrPlaying = r.fixtures.some(f => f.is_done || f.is_live);
+                        if (!playedOrPlaying) {
+                            playersLeft++;
+                        }
+                    }
+                });
+            }
+
+            meta.textContent = `GW pts: ${team.roundPoints ?? '—'}  •  Overall: ${team.overallPoints ?? '—'}  •  Squad value: ${team.value ?? '—'}  •  Players left: ${playersLeft}`;
 
             let html = '<table id="squad-table"><thead><tr><th>Pos</th><th>Player</th><th>Cty</th><th>Opp</th><th>Price</th><th style="text-align:right">GW</th><th style="text-align:right">Total</th><th>Role</th></tr></thead><tbody>';
 
