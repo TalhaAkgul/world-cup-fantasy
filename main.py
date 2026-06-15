@@ -286,7 +286,7 @@ def build_squad_rows(team, store, round_id):
 
 
 def build_owner_map_parallel(managers, cookie, round_id):
-    """Fetch all teams in parallel and build player_id → [manager_names]."""
+    """Fetch all teams in parallel and build player_id → [{"name": manager_name, "is_captain": bool, "is_vice": bool}]."""
     owner_map = {}
     lock = threading.Lock()
 
@@ -299,13 +299,19 @@ def build_owner_map_parallel(managers, cookie, round_id):
                 return
             lineup = team.get("lineup") or {}
             bench = team.get("bench") or {}
+            captain = team.get("captain")
+            vice = team.get("vice")
             pids = []
             for pos in POS_ORDER:
                 pids.extend(lineup.get(pos, []))
                 pids.extend(bench.get(pos, []))
             with lock:
                 for pid in pids:
-                    owner_map.setdefault(pid, []).append(name)
+                    owner_map.setdefault(pid, []).append({
+                        "name": name,
+                        "is_captain": pid == captain,
+                        "is_vice": pid == vice
+                    })
         except Exception:
             pass
 
@@ -582,7 +588,7 @@ def api_match_view():
                     "price": p.get("price"),
                     "gwPts": store.player_round_points(pid, m["round_id"]) if m["round_id"] else None,
                     "totalPts": store.player_total_points(pid),
-                    "owners": owners,
+                    "owners": sorted(owners, key=lambda x: x["name"]),
                 })
 
         if not all_players:
@@ -665,7 +671,7 @@ def api_most_picked():
             "gwPts": store.player_round_points(pid, use_rid),
             "totalPts": store.player_total_points(pid),
             "count": len(owners),
-            "owners": sorted(owners),
+            "owners": sorted(owners, key=lambda x: x["name"]),
         })
 
     # Most picked first; tie-break by total points, then name

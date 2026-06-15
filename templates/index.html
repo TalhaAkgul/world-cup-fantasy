@@ -518,6 +518,15 @@
             background: rgba(240, 165, 0, .15);
             color: var(--gold);
             border: 1px solid var(--gold-dim);
+            transition: all 0.2s ease;
+        }
+
+        .owner-badge.owner-captain {
+            background: linear-gradient(135deg, #f0a500 0%, #ffc030 100%);
+            color: #0a1628;
+            border: 1px solid #ffffff;
+            box-shadow: 0 0 10px rgba(240, 165, 0, 0.7);
+            font-weight: 700;
         }
 
         .no-owner {
@@ -1069,7 +1078,13 @@
 
                             players.forEach(p => {
                                 const ownersHtml = p.owners && p.owners.length
-                                    ? p.owners.map(o => `<span class="owner-badge">${esc(o)}</span>`).join('')
+                                    ? p.owners.map(o => {
+                                        if (o.is_captain) {
+                                            return `<span class="owner-badge owner-captain" title="Captain">👑 ${esc(o.name)}</span>`;
+                                        } else {
+                                            return `<span class="owner-badge">${esc(o.name)}</span>`;
+                                        }
+                                    }).join('')
                                     : (data.has_owners ? `<span class="no-owner">—</span>` : '');
                                 html += `<tr>
               <td><span class="pos-badge pos-${p.pos}">${p.pos}</span></td>
@@ -1148,7 +1163,7 @@
                 players = players.filter(p =>
                     p.name.toLowerCase().includes(filter) ||
                     (p.country || '').toLowerCase().includes(filter) ||
-                    p.owners.some(o => o.toLowerCase().includes(filter)));
+                    p.owners.some(o => o.name.toLowerCase().includes(filter)));
             }
 
             if (!players.length) {
@@ -1169,7 +1184,13 @@
             players.forEach((p, i) => {
                 const pct = total ? Math.round(p.count / total * 100) : 0;
                 const barW = Math.round(p.count / maxCount * 100);
-                const ownersHtml = p.owners.map(o => `<span class="owner-badge">${esc(o)}</span>`).join('');
+                const ownersHtml = p.owners.map(o => {
+                    if (o.is_captain) {
+                        return `<span class="owner-badge owner-captain" title="Captain">👑 ${esc(o.name)}</span>`;
+                    } else {
+                        return `<span class="owner-badge">${esc(o.name)}</span>`;
+                    }
+                }).join('');
                 html += `<tr>
         <td class="mp-rank">${i + 1}</td>
         <td><span class="pos-badge pos-${p.pos}">${esc(p.pos)}</span></td>
