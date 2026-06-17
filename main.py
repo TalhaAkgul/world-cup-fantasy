@@ -489,6 +489,8 @@ def api_status():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
+    global _cookie_cache
+    _cookie_cache = None  # Reset cookie cache so it reloads from environment/.env
     def do():
         try:
             store.load_static(force=True)
