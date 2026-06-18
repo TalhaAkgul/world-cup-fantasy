@@ -68,34 +68,68 @@ def http_get_json(url, cookie=None, timeout=30):
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://play.fifa.com/",
     }
-    if cookie:
-        headers["Cookie"] = cookie.strip()
 
-    if HAVE_REQUESTS:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        if r.status_code >= 400:
-            raise RuntimeError(f"HTTP {r.status_code}")
-        return r.json()
+    def do_fetch(cookie_to_use):
+        headers_to_use = headers.copy()
+        if cookie_to_use:
+            headers_to_use["Cookie"] = cookie_to_use.strip()
 
-    headers["Accept-Encoding"] = "gzip, deflate"
-    req = urlrequest.Request(url, headers=headers)
-    try:
-        with urlrequest.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            enc = (resp.headers.get("Content-Encoding") or "").lower()
-    except urlerror.HTTPError as e:
-        raise RuntimeError(f"HTTP {e.code}")
-    except urlerror.URLError as e:
-        raise RuntimeError(f"Network error: {e.reason}")
+        if HAVE_REQUESTS:
+            r = requests.get(url, headers=headers_to_use, timeout=timeout)
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code}")
+            return r.json()
 
-    if "gzip" in enc:
-        raw = gzip.decompress(raw)
-    elif "deflate" in enc:
+        headers_to_use["Accept-Encoding"] = "gzip, deflate"
+        req = urlrequest.Request(url, headers=headers_to_use)
         try:
-            raw = zlib.decompress(raw)
-        except zlib.error:
-            raw = zlib.decompress(raw, -zlib.MAX_WBITS)
-    return json.loads(raw.decode("utf-8", errors="replace"))
+            with urlrequest.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+                enc = (resp.headers.get("Content-Encoding") or "").lower()
+        except urlerror.HTTPError as e:
+            raise RuntimeError(f"HTTP {e.code}")
+        except urlerror.URLError as e:
+            raise RuntimeError(f"Network error: {e.reason}")
+
+        if "gzip" in enc:
+            raw = gzip.decompress(raw)
+        elif "deflate" in enc:
+            try:
+                raw = zlib.decompress(raw)
+            except zlib.error:
+                raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+        return json.loads(raw.decode("utf-8", errors="replace"))
+
+    try:
+        return do_fetch(cookie)
+    except RuntimeError as e:
+        if ("HTTP 401" in str(e) or "HTTP 403" in str(e)) and cookie:
+            print("[auth] API request failed with 401/403. Checking for cookie reload/refresh...", flush=True)
+            
+            global _cookie_cache
+            _cookie_cache = None
+            if "FIFA_COOKIE" in os.environ:
+                del os.environ["FIFA_COOKIE"]
+            if "COOKIE" in os.environ:
+                del os.environ["COOKIE"]
+                
+            new_cookie = _load_cookie()
+            if new_cookie and new_cookie != cookie:
+                print("[auth] Cookie was already updated by another thread. Retrying...", flush=True)
+                return do_fetch(new_cookie)
+                
+            print("[auth] Triggering selenium cookie refresh...", flush=True)
+            if trigger_selenium_refresh():
+                _cookie_cache = None
+                if "FIFA_COOKIE" in os.environ:
+                    del os.environ["FIFA_COOKIE"]
+                if "COOKIE" in os.environ:
+                    del os.environ["COOKIE"]
+                new_cookie = _load_cookie()
+                if new_cookie:
+                    print("[auth] Retrying with refreshed cookie...", flush=True)
+                    return do_fetch(new_cookie)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -416,15 +450,73 @@ def _load_env():
             print(f"[env] Failed to load .env: {e}", flush=True)
 
 
+_refresh_lock = threading.Lock()
+
+
+def _is_cookie_expired(cookie_str):
+    if not cookie_str:
+        return True
+    fp_user_val = None
+    for part in cookie_str.split(";"):
+        part = part.strip()
+        if part.startswith("fp.user="):
+            fp_user_val = part.split("=", 1)[1]
+            break
+            
+    if not fp_user_val:
+        return False
+        
+    try:
+        import urllib.parse
+        fp_user = json.loads(urllib.parse.unquote(fp_user_val))
+        expires_str = fp_user.get("expires")
+        if expires_str:
+            expires_dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if now >= (expires_dt - timedelta(minutes=2)):
+                return True
+    except Exception as e:
+        print(f"[auth] Error parsing cookie expiry: {e}", flush=True)
+        
+    return False
+
+
+def trigger_selenium_refresh():
+    with _refresh_lock:
+        try:
+            import refresh_cookie
+            return refresh_cookie.run_refresh()
+        except Exception as e:
+            print(f"[auth] Failed to run refresh_cookie: {e}", flush=True)
+            return False
+
+
 def _load_cookie():
     global _cookie_cache
     if _cookie_cache:
-        return _cookie_cache
+        if _is_cookie_expired(_cookie_cache):
+            print("[auth] Cached cookie is expired. Clearing cache.", flush=True)
+            _cookie_cache = None
+        else:
+            return _cookie_cache
+
     _load_env()
     env_cookie = os.environ.get("FIFA_COOKIE") or os.environ.get("COOKIE")
     if env_cookie:
-        _cookie_cache = env_cookie.strip()
-        return _cookie_cache
+        if _is_cookie_expired(env_cookie):
+            print("[auth] Env cookie is expired. Triggering pre-emptive refresh...", flush=True)
+            if trigger_selenium_refresh():
+                if "FIFA_COOKIE" in os.environ:
+                    del os.environ["FIFA_COOKIE"]
+                if "COOKIE" in os.environ:
+                    del os.environ["COOKIE"]
+                _load_env()
+                env_cookie = os.environ.get("FIFA_COOKIE") or os.environ.get("COOKIE")
+        
+        if env_cookie:
+            _cookie_cache = env_cookie.strip()
+            return _cookie_cache
+
     if os.path.exists(COOKIE_FILE):
         try:
             with open(COOKIE_FILE, encoding="utf-8") as f:
