@@ -314,6 +314,11 @@ def run_refresh():
                 print(f"  {entry}")
         except Exception:
             pass
+        try:
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            print(f"[selenium] Page text snippet (first 1000 chars):\n{body_text[:1000]}")
+        except Exception:
+            pass
         # Save screenshot for debugging
         try:
             screenshot_path = os.path.join(HERE, "selenium_error.png")
