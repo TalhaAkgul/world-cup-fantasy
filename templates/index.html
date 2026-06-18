@@ -757,6 +757,7 @@
         <h1>⚽ FIFA Fantasy <span>Tracker</span></h1>
         <div class="header-right">
             <span id="status-pill">Loading…</span>
+            <button class="btn-outline" onclick="promptCookie()">🔑 Refresh cookie</button>
             <button class="btn-outline" onclick="manualRefresh()">↺ Refresh feeds</button>
         </div>
     </header>
@@ -861,6 +862,8 @@
     <div id="toast" class="toast"></div>
 
     <script>
+        const API_KEY = "{{ api_key }}";
+
         // ---------------------------------------------------------------------------
         // State
         // ---------------------------------------------------------------------------
@@ -1276,13 +1279,45 @@
         // ---------------------------------------------------------------------------
         async function fetchJson(url, method = 'GET', body = null) {
             try {
-                const opts = { method, headers: { 'Content-Type': 'application/json' } };
+                const headers = { 'Content-Type': 'application/json' };
+                if (typeof API_KEY !== 'undefined' && API_KEY) {
+                    headers['X-Api-Key'] = API_KEY;
+                }
+                const opts = { method, headers };
                 if (body) opts.body = JSON.stringify(body);
                 const res = await fetch(url, opts);
                 return await res.json();
             } catch (e) {
                 showToast(`Error: ${e.message}`, true);
                 return null;
+            }
+        }
+
+        async function promptCookie() {
+            const val = prompt("Paste your new FIFA_COOKIE here:");
+            if (val === null) return; // Cancelled
+            const trimmed = val.trim();
+            if (!trimmed) {
+                showToast("Cookie cannot be empty", true);
+                return;
+            }
+
+            showToast("Updating cookie...");
+            try {
+                const res = await fetchJson('/api/update-cookie', 'POST', { cookie: trimmed });
+                if (res && res.ok) {
+                    showToast("Cookie successfully updated!");
+                    setTimeout(async () => {
+                        const s = await fetchJson('/api/status');
+                        if (s) updateStatusPill(s);
+                        manualRefresh();
+                    }, 1000);
+                } else {
+                    const err = (res && res.error) || "Failed to update cookie";
+                    showToast(err, true);
+                }
+            } catch (e) {
+                showToast(`Error: ${e.message}`, true);
             }
         }
 

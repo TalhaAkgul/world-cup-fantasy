@@ -126,7 +126,7 @@ def http_get_json(url, cookie=None, timeout=30):
                 print("[auth] Retrying with reloaded cookie...", flush=True)
                 return do_fetch(new_cookie)
             else:
-                print("[auth] Cookie is expired or invalid. Please update the cookie using the Tampermonkey Userscript.", flush=True)
+                print("[auth] Cookie is expired or invalid. Please update the cookie using the web UI.", flush=True)
         raise
 
 
@@ -537,7 +537,7 @@ def _load_cookie():
     env_cookie = os.environ.get("FIFA_COOKIE") or os.environ.get("COOKIE")
     if env_cookie:
         if _is_cookie_expired(env_cookie):
-            print("[auth] Warning: Env cookie is expired. Please sync new credentials via Userscript.", flush=True)
+            print("[auth] Warning: Env cookie is expired. Please update it via the web UI.", flush=True)
         
         _cookie_cache = env_cookie.strip()
         return _cookie_cache
@@ -584,7 +584,9 @@ def _init():
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    return render_template("index.html")
+    _load_env()
+    secret_key = os.environ.get("SECRET_API_KEY", "")
+    return render_template("index.html", api_key=secret_key)
 
 
 @app.route("/api/status")
@@ -639,9 +641,28 @@ def api_update_cookie():
         
     try:
         update_env_file("FIFA_COOKIE", new_cookie)
+        
+        # Try to extract expires from fp.user in the cookie if not provided
+        if not expires:
+            for part in new_cookie.split(";"):
+                part = part.strip()
+                if part.startswith("fp.user="):
+                    try:
+                        import urllib.parse
+                        fp_user_val = part.split("=", 1)[1]
+                        fp_user = json.loads(urllib.parse.unquote(fp_user_val))
+                        expires = fp_user.get("expires")
+                    except Exception:
+                        pass
+                    break
+
         if expires:
             update_env_file("FIFA_COOKIE_EXPIRES", expires)
             os.environ["FIFA_COOKIE_EXPIRES"] = expires
+        else:
+            if "FIFA_COOKIE_EXPIRES" in os.environ:
+                del os.environ["FIFA_COOKIE_EXPIRES"]
+            update_env_file("FIFA_COOKIE_EXPIRES", "")
         
         # Clear server caches so it picks up the new cookie instantly
         global _cookie_cache
