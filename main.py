@@ -104,7 +104,7 @@ def http_get_json(url, cookie=None, timeout=30):
         return do_fetch(cookie)
     except RuntimeError as e:
         if ("HTTP 401" in str(e) or "HTTP 403" in str(e)) and cookie:
-            print("[auth] API request failed with 401/403. Checking for cookie reload/refresh...", flush=True)
+            print("[auth] API request failed with 401/403. Reloading cookie...", flush=True)
             
             global _cookie_cache
             _cookie_cache = None
@@ -115,20 +115,10 @@ def http_get_json(url, cookie=None, timeout=30):
                 
             new_cookie = _load_cookie()
             if new_cookie and new_cookie != cookie:
-                print("[auth] Cookie was already updated by another thread. Retrying...", flush=True)
+                print("[auth] Retrying with reloaded cookie...", flush=True)
                 return do_fetch(new_cookie)
-                
-            print("[auth] Triggering selenium cookie refresh...", flush=True)
-            if trigger_selenium_refresh():
-                _cookie_cache = None
-                if "FIFA_COOKIE" in os.environ:
-                    del os.environ["FIFA_COOKIE"]
-                if "COOKIE" in os.environ:
-                    del os.environ["COOKIE"]
-                new_cookie = _load_cookie()
-                if new_cookie:
-                    print("[auth] Retrying with refreshed cookie...", flush=True)
-                    return do_fetch(new_cookie)
+            else:
+                print("[auth] Cookie is expired or invalid. Please update the cookie using the Tampermonkey Userscript.", flush=True)
         raise
 
 
@@ -431,6 +421,28 @@ store = DataStore()
 _cookie_cache = None
 
 
+def update_env_file(key, value):
+    env_file = os.path.join(HERE, ".env")
+    lines = []
+    found = False
+    if os.path.exists(env_file):
+        with open(env_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+    new_line = f'{key}="{value}"\n'
+    for i, line in enumerate(lines):
+        if line.strip().startswith(key + "="):
+            lines[i] = new_line
+            found = True
+            break
+            
+    if not found:
+        lines.append(new_line)
+        
+    with open(env_file, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
 def _load_env():
     env_file = os.path.join(HERE, ".env")
     if os.path.exists(env_file):
@@ -449,8 +461,16 @@ def _load_env():
         except Exception as e:
             print(f"[env] Failed to load .env: {e}", flush=True)
 
-
-_refresh_lock = threading.Lock()
+    # Auto-generate SECRET_API_KEY if not present
+    if not os.environ.get("SECRET_API_KEY"):
+        try:
+            import secrets
+            new_key = secrets.token_hex(16)
+            update_env_file("SECRET_API_KEY", new_key)
+            os.environ["SECRET_API_KEY"] = new_key
+            print(f"[env] Auto-generated secure SECRET_API_KEY: {new_key}", flush=True)
+        except Exception as e:
+            print(f"[env] Failed to auto-generate SECRET_API_KEY: {e}", flush=True)
 
 
 def _is_cookie_expired(cookie_str):
@@ -481,16 +501,6 @@ def _is_cookie_expired(cookie_str):
     return False
 
 
-def trigger_selenium_refresh():
-    with _refresh_lock:
-        try:
-            import refresh_cookie
-            return refresh_cookie.run_refresh()
-        except Exception as e:
-            print(f"[auth] Failed to run refresh_cookie: {e}", flush=True)
-            return False
-
-
 def _load_cookie():
     global _cookie_cache
     if _cookie_cache:
@@ -504,18 +514,10 @@ def _load_cookie():
     env_cookie = os.environ.get("FIFA_COOKIE") or os.environ.get("COOKIE")
     if env_cookie:
         if _is_cookie_expired(env_cookie):
-            print("[auth] Env cookie is expired. Triggering pre-emptive refresh...", flush=True)
-            if trigger_selenium_refresh():
-                if "FIFA_COOKIE" in os.environ:
-                    del os.environ["FIFA_COOKIE"]
-                if "COOKIE" in os.environ:
-                    del os.environ["COOKIE"]
-                _load_env()
-                env_cookie = os.environ.get("FIFA_COOKIE") or os.environ.get("COOKIE")
+            print("[auth] Warning: Env cookie is expired. Please sync new credentials via Userscript.", flush=True)
         
-        if env_cookie:
-            _cookie_cache = env_cookie.strip()
-            return _cookie_cache
+        _cookie_cache = env_cookie.strip()
+        return _cookie_cache
 
     if os.path.exists(COOKIE_FILE):
         try:
@@ -592,6 +594,39 @@ def api_refresh():
             print(f"[manual-refresh] {e}", flush=True)
     threading.Thread(target=do, daemon=True).start()
     return jsonify({"ok": True})
+
+
+@app.route("/api/update-cookie", methods=["POST"])
+def api_update_cookie():
+    _load_env()
+    secret_key = os.environ.get("SECRET_API_KEY")
+    if not secret_key:
+        return jsonify({"error": "SECRET_API_KEY is not configured on the server."}), 500
+        
+    req_key = request.headers.get("X-Api-Key")
+    if not req_key or req_key != secret_key:
+        return jsonify({"error": "Unauthorized"}), 401
+        
+    data = request.json or {}
+    new_cookie = data.get("cookie")
+    if not new_cookie:
+        return jsonify({"error": "Missing cookie in request body"}), 400
+        
+    try:
+        import refresh_cookie
+        refresh_cookie.update_env_file("FIFA_COOKIE", new_cookie)
+        
+        # Clear server caches so it picks up the new cookie instantly
+        global _cookie_cache
+        _cookie_cache = new_cookie.strip()
+        os.environ["FIFA_COOKIE"] = new_cookie.strip()
+        if "COOKIE" in os.environ:
+            del os.environ["COOKIE"]
+            
+        print("[auth] Cookie successfully updated via API sync endpoint.", flush=True)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": f"Failed to update cookie: {str(e)}"}), 500
 
 
 @app.route("/api/rounds")
