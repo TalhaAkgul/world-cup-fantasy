@@ -329,11 +329,14 @@ def build_squad_rows(team, store, round_id):
     lineup = team.get("lineup") or {}
     bench = team.get("bench") or {}
     bench_order = team.get("benchOrder") or []
+    twelfth_man = team.get("twelfthMan") or {}
+    twelfth_man_pid = twelfth_man.get("playerId")
     rows = []
 
-    def make_row(pid, starter):
+    def make_row(pid, starter, role=""):
         p = store.player(pid)
-        role = "C" if pid == captain else ("V" if pid == vice else "")
+        if not role:
+            role = "C" if pid == captain else ("V" if pid == vice else "")
         squad_id = p.get("squadId")
         return {
             "pid": pid,
@@ -352,6 +355,9 @@ def build_squad_rows(team, store, round_id):
         for pid in lineup.get(pos, []):
             rows.append(make_row(pid, True))
 
+    if twelfth_man_pid:
+        rows.append(make_row(twelfth_man_pid, True, role="12th"))
+
     bench_ids = list(bench_order) if bench_order else []
     if not bench_ids:
         for pos in POS_ORDER:
@@ -363,7 +369,7 @@ def build_squad_rows(team, store, round_id):
 
 
 def build_owner_map_parallel(managers, cookie, round_id):
-    """Fetch all teams in parallel and build player_id → [{"name": manager_name, "is_captain": bool, "is_vice": bool}]."""
+    """Fetch all teams in parallel and build player_id → [{"name": manager_name, "is_captain": bool, "is_vice": bool, "is_twelfth_man": bool}]."""
     owner_map = {}
     lock = threading.Lock()
 
@@ -378,6 +384,9 @@ def build_owner_map_parallel(managers, cookie, round_id):
             bench = team.get("bench") or {}
             captain = team.get("captain")
             vice = team.get("vice")
+            twelfth_man = team.get("twelfthMan") or {}
+            twelfth_man_pid = twelfth_man.get("playerId")
+            
             pids = []
             for pos in POS_ORDER:
                 pids.extend(lineup.get(pos, []))
@@ -387,7 +396,15 @@ def build_owner_map_parallel(managers, cookie, round_id):
                     owner_map.setdefault(pid, []).append({
                         "name": name,
                         "is_captain": pid == captain,
-                        "is_vice": pid == vice
+                        "is_vice": pid == vice,
+                        "is_twelfth_man": False
+                    })
+                if twelfth_man_pid:
+                    owner_map.setdefault(twelfth_man_pid, []).append({
+                        "name": name,
+                        "is_captain": False,
+                        "is_vice": False,
+                        "is_twelfth_man": True
                     })
         except Exception:
             pass
@@ -717,6 +734,9 @@ def api_league():
                     "value": team.get("value"),
                     "captain": team.get("captain"),
                     "vice": team.get("vice"),
+                    "twelfthMan": team.get("twelfthMan"),
+                    "wildCard": team.get("wildCard"),
+                    "maxCaptain": team.get("maxCaptain") or team.get("maxCaptainBooster"),
                     "rows": build_squad_rows(team, store, round_id),
                 }
         except Exception:

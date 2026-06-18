@@ -529,6 +529,14 @@
             font-weight: 700;
         }
 
+        .owner-badge.owner-twelfth-man {
+            background: linear-gradient(135deg, #00d46a 0%, #20c060 100%);
+            color: #0a1628;
+            border: 1px solid #ffffff;
+            box-shadow: 0 0 10px rgba(0, 212, 106, 0.6);
+            font-weight: 700;
+        }
+
         .fix-badge {
             font-size: 10px;
             padding: 2px 5px;
@@ -1019,7 +1027,15 @@
                 });
             }
 
-            meta.textContent = `GW pts: ${team.roundPoints ?? '—'}  •  Overall: ${team.overallPoints ?? '—'}  •  Squad value: ${team.value ?? '—'}  •  Players left: ${playersLeft}`;
+            let chipText = "";
+            if (team.twelfthMan) {
+                chipText = "  •  🃏 12th Man Active";
+            } else if (team.wildCard) {
+                chipText = "  •  🃏 Wildcard Active";
+            } else if (team.maxCaptain) {
+                chipText = "  •  🃏 Max Captain Active";
+            }
+            meta.textContent = `GW pts: ${team.roundPoints ?? '—'}  •  Overall: ${team.overallPoints ?? '—'}  •  Squad value: ${team.value ?? '—'}  •  Players left: ${playersLeft}${chipText}`;
 
             let html = '<table id="squad-table"><thead><tr><th>Pos</th><th>Player</th><th>Cty</th><th>Opp</th><th>Price</th><th style="text-align:right">GW</th><th style="text-align:right">Total</th><th>Role</th></tr></thead><tbody>';
 
@@ -1144,6 +1160,8 @@
                                     ? p.owners.map(o => {
                                         if (o.is_captain) {
                                             return `<span class="owner-badge owner-captain" title="Captain">👑 ${esc(o.name)}</span>`;
+                                        } else if (o.is_twelfth_man) {
+                                            return `<span class="owner-badge owner-twelfth-man" title="12th Man">🏃 ${esc(o.name)}</span>`;
                                         } else {
                                             return `<span class="owner-badge">${esc(o.name)}</span>`;
                                         }
@@ -1250,6 +1268,8 @@
                 const ownersHtml = p.owners.map(o => {
                     if (o.is_captain) {
                         return `<span class="owner-badge owner-captain" title="Captain">👑 ${esc(o.name)}</span>`;
+                    } else if (o.is_twelfth_man) {
+                        return `<span class="owner-badge owner-twelfth-man" title="12th Man">🏃 ${esc(o.name)}</span>`;
                     } else {
                         return `<span class="owner-badge">${esc(o.name)}</span>`;
                     }
