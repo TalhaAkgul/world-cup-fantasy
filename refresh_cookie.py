@@ -37,7 +37,17 @@ def get_webdriver():
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--window-size=1280,1024')
-        return webdriver.Chrome(options=options)
+        
+        # Check for system-installed ChromeDriver on Linux
+        from selenium.webdriver.chrome.service import Service
+        chrome_service = None
+        for path in ["/usr/bin/chromedriver", "/usr/lib/chromium-browser/chromedriver"]:
+            if os.path.exists(path):
+                chrome_service = Service(executable_path=path)
+                print(f"[selenium] Using system ChromeDriver at {path}")
+                break
+                
+        return webdriver.Chrome(service=chrome_service, options=options)
     except Exception as e:
         print(f"[selenium] Chrome driver failed to init: {e}. Trying Edge...")
         
