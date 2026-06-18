@@ -77,6 +77,7 @@ def http_get_json(url, cookie=None, timeout=30):
         if HAVE_REQUESTS:
             r = requests.get(url, headers=headers_to_use, timeout=timeout)
             if r.status_code >= 400:
+                print(f"[auth] Request failed for URL {url}: HTTP {r.status_code}. Response: {r.text[:500]}", flush=True)
                 raise RuntimeError(f"HTTP {r.status_code}")
             return r.json()
 
@@ -87,6 +88,11 @@ def http_get_json(url, cookie=None, timeout=30):
                 raw = resp.read()
                 enc = (resp.headers.get("Content-Encoding") or "").lower()
         except urlerror.HTTPError as e:
+            try:
+                err_body = e.read()
+                print(f"[auth] Request failed for URL {url}: HTTP {e.code}. Response: {err_body[:500]}", flush=True)
+            except Exception:
+                pass
             raise RuntimeError(f"HTTP {e.code}")
         except urlerror.URLError as e:
             raise RuntimeError(f"Network error: {e.reason}")
