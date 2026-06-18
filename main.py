@@ -597,6 +597,7 @@ def api_refresh():
 
 
 @app.route("/api/update-cookie", methods=["POST"])
+@app.route("/api/update-cookie/", methods=["POST"])
 def api_update_cookie():
     _load_env()
     secret_key = os.environ.get("SECRET_API_KEY")
@@ -613,8 +614,7 @@ def api_update_cookie():
         return jsonify({"error": "Missing cookie in request body"}), 400
         
     try:
-        import refresh_cookie
-        refresh_cookie.update_env_file("FIFA_COOKIE", new_cookie)
+        update_env_file("FIFA_COOKIE", new_cookie)
         
         # Clear server caches so it picks up the new cookie instantly
         global _cookie_cache
