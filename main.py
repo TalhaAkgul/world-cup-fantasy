@@ -112,6 +112,8 @@ def http_get_json(url, cookie=None, timeout=30):
                 del os.environ["FIFA_COOKIE"]
             if "COOKIE" in os.environ:
                 del os.environ["COOKIE"]
+            if "FIFA_COOKIE_EXPIRES" in os.environ:
+                del os.environ["FIFA_COOKIE_EXPIRES"]
                 
             new_cookie = _load_cookie()
             if new_cookie and new_cookie != cookie:
@@ -476,6 +478,21 @@ def _load_env():
 def _is_cookie_expired(cookie_str):
     if not cookie_str:
         return True
+        
+    # First, try to get the expiration time from the FIFA_COOKIE_EXPIRES env variable
+    _load_env()
+    expires_str = os.environ.get("FIFA_COOKIE_EXPIRES")
+    if expires_str:
+        try:
+            expires_dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if now >= (expires_dt - timedelta(minutes=2)):
+                return True
+            return False
+        except Exception as e:
+            print(f"[auth] Error parsing FIFA_COOKIE_EXPIRES: {e}", flush=True)
+
+    # Fallback to older mechanism where fp.user was inside the cookie string
     fp_user_val = None
     for part in cookie_str.split(";"):
         part = part.strip()
@@ -610,11 +627,15 @@ def api_update_cookie():
         
     data = request.json or {}
     new_cookie = data.get("cookie")
+    expires = data.get("expires")
     if not new_cookie:
         return jsonify({"error": "Missing cookie in request body"}), 400
         
     try:
         update_env_file("FIFA_COOKIE", new_cookie)
+        if expires:
+            update_env_file("FIFA_COOKIE_EXPIRES", expires)
+            os.environ["FIFA_COOKIE_EXPIRES"] = expires
         
         # Clear server caches so it picks up the new cookie instantly
         global _cookie_cache
