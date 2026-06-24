@@ -756,6 +756,37 @@
 
 
         }
+
+        .opt-card {
+            background: linear-gradient(135deg, var(--card) 0%, var(--surface) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+        .opt-card-val {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--gold);
+            margin-top: 4px;
+        }
+        .opt-card-lbl {
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+        #optimizer-panel input,
+        #optimizer-panel select {
+            transition: border-color .15s, box-shadow .15s;
+        }
+        #optimizer-panel input:focus,
+        #optimizer-panel select:focus {
+            border-color: var(--gold);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(240, 165, 0, 0.2);
+        }
     </style>
 </head>
 
@@ -777,6 +808,7 @@
         <button class="tab-btn active" onclick="switchTab('league')">📊 League Tracker</button>
         <button class="tab-btn" onclick="switchTab('matches')">🗓 Match View</button>
         <button class="tab-btn" onclick="switchTab('picked')">🔥 Most Picked</button>
+        <button class="tab-btn" onclick="switchTab('optimizer')">🔮 Squad Optimizer</button>
     </div>
 
     <!-- ===================================================
@@ -866,6 +898,69 @@
         </div>
     </div>
 
+    <!-- ===================================================
+     TAB 4: SQUAD OPTIMIZER
+     =================================================== -->
+    <div id="tab-optimizer" class="tab-content">
+        <div class="split">
+            <!-- left: controls -->
+            <div id="optimizer-panel" style="border-right: 1px solid var(--border); overflow-y: auto; padding: 16px 20px;">
+                <div class="panel-hdr" style="margin: -16px -20px 16px -20px; position: sticky; top: -16px;">Optimization Parameters</div>
+                
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted);">Target Gameweek / Points</label>
+                    <select id="opt-round-select" style="width: 100%; padding: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);">
+                        <option value="total">Total Points (All GWs)</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted);">Candidate Player Pool</label>
+                    <select id="opt-pool-select" style="width: 100%; padding: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);">
+                        <option value="managers">League Players (Chosen by managers)</option>
+                        <option value="all">All Players (Entire game)</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted);">Squad Structure</label>
+                    <select id="opt-squad-select" style="width: 100%; padding: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);">
+                        <option value="squad">Full Squad (15 players: 2 GK, 5 DEF, 5 MID, 3 FWD)</option>
+                        <option value="starting_xi">Starting XI (11 players: 1 GK, 3-5 DEF, 3-5 MID, 1-3 FWD)</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted);">Squad Budget (M)</label>
+                    <input type="number" id="opt-budget-input" value="100.0" min="40.0" max="200.0" step="0.1" style="width: 100%; padding: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);">
+                </div>
+
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted);">Max Players per Country</label>
+                    <input type="number" id="opt-max-team-input" value="3" min="1" max="15" step="1" style="width: 100%; padding: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);">
+                </div>
+
+                <button class="btn" onclick="runOptimizer()" style="width: 100%; padding: 12px; font-size: 14px;">🔮 Run Optimizer</button>
+            </div>
+            
+            <!-- right: optimized squad output -->
+            <div id="opt-results-panel" style="overflow-y: auto; padding: 16px 20px;">
+                <div id="opt-results-placeholder" class="empty">
+                    <div style="font-size: 40px">🔮</div>
+                    <p>Configure parameters and click <strong>Run Optimizer</strong> to find the highest-scoring squad under budget.</p>
+                </div>
+                <div id="opt-results-content" style="display: none;">
+                    <div id="opt-summary-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                        <!-- summary cards go here -->
+                    </div>
+                    <div id="opt-table-container">
+                        <!-- optimized players table goes here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== TOAST ===== -->
     <div id="toast" class="toast"></div>
 
@@ -916,15 +1011,17 @@
                 'round-select': '',
                 'mv-round-select': '<option value="">All rounds</option>',
                 'mp-round-select': '<option value="">Current round</option>',
+                'opt-round-select': '<option value="total">Total Points (All GWs)</option>',
             };
             Object.keys(placeholders).forEach(id => {
                 const sel = document.getElementById(id);
+                if (!sel) return;
                 sel.innerHTML = placeholders[id];
                 rounds.forEach(r => {
                     const opt = document.createElement('option');
                     opt.value = r.id;
                     opt.textContent = `GW ${r.id}${r.status ? '  (' + r.status + ')' : ''}`;
-                    if (r.id === currentId) opt.selected = true;
+                    if (r.id === currentId && id !== 'opt-round-select') opt.selected = true;
                     sel.appendChild(opt);
                 });
             });
@@ -1292,6 +1389,108 @@
 
             html += '</tbody></table>';
             body.innerHTML = html;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Squad Optimizer tab
+        // ---------------------------------------------------------------------------
+        async function runOptimizer() {
+            const roundId = document.getElementById('opt-round-select').value;
+            const pool = document.getElementById('opt-pool-select').value;
+            const squadType = document.getElementById('opt-squad-select').value;
+            const budget = document.getElementById('opt-budget-input').value;
+            const maxPerTeam = document.getElementById('opt-max-team-input').value;
+
+            const placeholder = document.getElementById('opt-results-placeholder');
+            const content = document.getElementById('opt-results-content');
+            
+            placeholder.innerHTML = '<div class="loader">Calculating optimal squad (solving integer program)…</div>';
+            placeholder.style.display = 'block';
+            content.style.display = 'none';
+
+            const url = `/api/optimize-squad?round_id=${roundId}&pool=${pool}&squad_type=${squadType}&budget=${budget}&max_per_team=${maxPerTeam}`;
+            const data = await fetchJson(url);
+
+            if (!data) {
+                placeholder.innerHTML = '<div class="empty"><div style="font-size:40px">❌</div><p>Failed to retrieve response from server.</p></div>';
+                return;
+            }
+
+            if (!data.success) {
+                const errMsg = data.error || "Optimization failed.";
+                placeholder.innerHTML = `<div class="empty">
+                    <div style="font-size:40px">⚠️</div>
+                    <p style="color:#e06060; font-weight:600;">Optimization Infeasible</p>
+                    <p style="margin-top:8px; max-width:400px; margin-left:auto; margin-right:auto;">${esc(errMsg)}</p>
+                </div>`;
+                return;
+            }
+
+            placeholder.style.display = 'none';
+            content.style.display = 'block';
+
+            renderOptimizationResults(data);
+        }
+
+        function renderOptimizationResults(data) {
+            const summaryCards = document.getElementById('opt-summary-cards');
+            const tableContainer = document.getElementById('opt-table-container');
+
+            const avgPrice = (data.total_cost / data.players.length).toFixed(2);
+            summaryCards.innerHTML = `
+                <div class="opt-card">
+                    <div class="opt-card-lbl">Total Points</div>
+                    <div class="opt-card-val">${data.total_points}</div>
+                </div>
+                <div class="opt-card">
+                    <div class="opt-card-lbl">Total Cost</div>
+                    <div class="opt-card-val">${data.total_cost.toFixed(1)}M / ${data.budget}M</div>
+                </div>
+                <div class="opt-card">
+                    <div class="opt-card-lbl">Avg Player Price</div>
+                    <div class="opt-card-val">${avgPrice}M</div>
+                </div>
+                <div class="opt-card">
+                    <div class="opt-card-lbl">Squad Size</div>
+                    <div class="opt-card-val">${data.players.length}</div>
+                </div>
+            `;
+
+            let html = '<table id="squad-table"><thead><tr><th>Pos</th><th>Player</th><th>Cty</th><th>Price</th><th style="text-align:right">Target Pts</th><th style="text-align:right">GW Pts</th><th style="text-align:right">Total Pts</th><th>Managers</th></tr></thead><tbody>';
+
+            let currentPos = '';
+            data.players.forEach(p => {
+                if (p.pos !== currentPos) {
+                    currentPos = p.pos;
+                    html += `<tr class="section-row"><td colspan="8">🛡️ ${currentPos}</td></tr>`;
+                }
+
+                const ownersHtml = p.owners && p.owners.length
+                    ? p.owners.map(o => {
+                        if (o.is_captain) {
+                            return `<span class="owner-badge owner-captain" title="Captain">👑 ${esc(o.name)}</span>`;
+                        } else if (o.is_twelfth_man) {
+                            return `<span class="owner-badge owner-twelfth-man" title="12th Man">🏃 ${esc(o.name)}</span>`;
+                        } else {
+                            return `<span class="owner-badge">${esc(o.name)}</span>`;
+                        }
+                    }).join('')
+                    : `<span class="no-owner">—</span>`;
+
+                html += `<tr>
+                    <td><span class="pos-badge pos-${p.pos}">${p.pos}</span></td>
+                    <td><strong>${esc(p.name)}</strong></td>
+                    <td>${esc(p.country)}</td>
+                    <td>${p.price.toFixed(1)}M</td>
+                    <td class="pts-cell good">${p.pts}</td>
+                    <td class="pts-cell">${p.gwPts}</td>
+                    <td class="pts-cell">${p.totalPts}</td>
+                    <td><div class="owners-list">${ownersHtml}</div></td>
+                </tr>`;
+            });
+
+            html += '</tbody></table>';
+            tableContainer.innerHTML = html;
         }
 
         // ---------------------------------------------------------------------------

@@ -953,6 +953,161 @@ def api_most_picked():
     })
 
 
+@app.route("/api/optimize-squad")
+def api_optimize_squad():
+    cookie = _load_cookie()
+    try:
+        league_id = int(request.args.get("league_id", DEFAULT_LEAGUE_ID))
+        round_id_str = request.args.get("round_id", "")
+        budget = float(request.args.get("budget", 100.0))
+        max_per_team = int(request.args.get("max_per_team", 3))
+        pool = request.args.get("pool", "managers")
+        squad_type = request.args.get("squad_type", "squad")
+    except ValueError:
+        return jsonify({"error": "Invalid parameters"}), 400
+
+    if pool == "managers" and not cookie:
+        return jsonify({"error": "No cookie configured on the server. Please refresh cookie or choose All Players pool."}), 400
+
+    current_rid = store.current_round_id() or 1
+    if round_id_str == "total":
+        use_round_id = None
+        candidate_round_id = current_rid
+    else:
+        try:
+            use_round_id = int(round_id_str) if round_id_str else current_rid
+            candidate_round_id = use_round_id
+        except ValueError:
+            use_round_id = current_rid
+            candidate_round_id = current_rid
+
+    candidate_pids = None
+    owner_map = {}
+    if pool == "managers":
+        try:
+            managers = fetch_league(league_id, cookie)
+            owner_map = get_owner_map(league_id, candidate_round_id, cookie, managers)
+            candidate_pids = set(owner_map.keys())
+        except Exception as e:
+            return jsonify({"error": f"Failed to fetch league players: {str(e)}"}), 502
+    else:
+        if cookie:
+            try:
+                managers = fetch_league(league_id, cookie)
+                owner_map = get_owner_map(league_id, current_rid, cookie, managers)
+            except Exception:
+                pass
+
+    valid_players = []
+    for pid, p in store.players.items():
+        if candidate_pids is not None and pid not in candidate_pids:
+            continue
+        price = p.get("price")
+        pos = p.get("position")
+        if price is not None and pos in POS_ORDER:
+            if use_round_id is None:
+                pts = store.player_total_points(pid)
+            else:
+                pts = store.player_round_points(pid, use_round_id)
+            
+            pts = float(pts) if pts is not None else 0.0
+            
+            valid_players.append({
+                "pid": pid,
+                "name": store.player_name(pid),
+                "pos": pos,
+                "country": store.squad_abbr(p.get("squadId")),
+                "squadId": p.get("squadId"),
+                "price": float(price),
+                "pts": pts,
+                "totalPts": store.player_total_points(pid) or 0,
+                "gwPts": store.player_round_points(pid, use_round_id or current_rid) or 0,
+                "owners": sorted(owner_map.get(pid, []), key=lambda x: x["name"]),
+            })
+
+    if not valid_players:
+        return jsonify({"error": "No players available with points data."}), 400
+
+    import numpy as np
+    from scipy.optimize import milp, Bounds, LinearConstraint
+
+    n = len(valid_players)
+    c = np.array([-p["pts"] for p in valid_players])
+    bounds = Bounds(np.zeros(n), np.ones(n))
+    integrality = np.ones(n)
+
+    A = []
+    lb = []
+    ub = []
+
+    # 1. Total count
+    total_count = 15 if squad_type == "squad" else 11
+    A.append(np.ones(n))
+    lb.append(total_count)
+    ub.append(total_count)
+
+    # 2. Positions
+    if squad_type == "squad":
+        pos_limits = {"GK": (2, 2), "DEF": (5, 5), "MID": (5, 5), "FWD": (3, 3)}
+    else:
+        pos_limits = {"GK": (1, 1), "DEF": (3, 5), "MID": (3, 5), "FWD": (1, 3)}
+
+    for pos, (l_val, u_val) in pos_limits.items():
+        row = np.array([1.0 if p["pos"] == pos else 0.0 for p in valid_players])
+        A.append(row)
+        lb.append(l_val)
+        ub.append(u_val)
+
+    # 3. Budget
+    row_budget = np.array([p["price"] for p in valid_players])
+    A.append(row_budget)
+    lb.append(0.0)
+    ub.append(budget)
+
+    # 4. Max per team
+    squad_ids = set(p["squadId"] for p in valid_players if p["squadId"] is not None)
+    for sid in squad_ids:
+        row_team = np.array([1.0 if p["squadId"] == sid else 0.0 for p in valid_players])
+        A.append(row_team)
+        lb.append(0)
+        ub.append(max_per_team)
+
+    A = np.vstack(A)
+    lb = np.array(lb)
+    ub = np.array(ub)
+
+    constraints = LinearConstraint(A, lb, ub)
+
+    res = milp(c, bounds=bounds, constraints=constraints, integrality=integrality)
+
+    if res.success:
+        selected_indices = np.where(res.x > 0.5)[0]
+        selected_players = [valid_players[i] for i in selected_indices]
+        
+        pos_rank = {pos: i for i, pos in enumerate(POS_ORDER)}
+        selected_players.sort(key=lambda x: (pos_rank.get(x["pos"], 99), -x["pts"], x["name"]))
+        
+        total_points = sum(p["pts"] for p in selected_players)
+        total_cost = sum(p["price"] for p in selected_players)
+
+        return jsonify({
+            "success": True,
+            "players": selected_players,
+            "total_points": round(total_points, 1),
+            "total_cost": round(total_cost, 2),
+            "squad_type": squad_type,
+            "round_id": round_id_str,
+            "pool": pool,
+            "budget": budget,
+            "max_per_team": max_per_team,
+        })
+    else:
+        return jsonify({
+            "success": False,
+            "error": f"Optimization failed: {res.message}. Try increasing the budget, choosing a different squad type, or increasing max players per country."
+        })
+
+
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     _init()
