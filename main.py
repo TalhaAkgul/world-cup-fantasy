@@ -323,14 +323,27 @@ def get_player_fixtures(squad_id, round_id, store):
     return fixtures
 
 
+def is_booster_active(booster_val, round_id):
+    if not booster_val:
+        return False
+    if isinstance(booster_val, dict):
+        return booster_val.get("roundId") == round_id
+    try:
+        return int(booster_val) == round_id
+    except (ValueError, TypeError):
+        return False
+
+
 def build_squad_rows(team, store, round_id):
     captain = team.get("captain")
     vice = team.get("vice")
     lineup = team.get("lineup") or {}
     bench = team.get("bench") or {}
     bench_order = team.get("benchOrder") or []
-    twelfth_man = team.get("twelfthMan") or {}
-    twelfth_man_pid = twelfth_man.get("playerId")
+    twelfth_man = team.get("twelfthMan")
+    twelfth_man_pid = None
+    if twelfth_man and isinstance(twelfth_man, dict) and twelfth_man.get("roundId") == round_id:
+        twelfth_man_pid = twelfth_man.get("playerId")
     rows = []
 
     def make_row(pid, starter, role=""):
@@ -384,8 +397,10 @@ def build_owner_map_parallel(managers, cookie, round_id):
             bench = team.get("bench") or {}
             captain = team.get("captain")
             vice = team.get("vice")
-            twelfth_man = team.get("twelfthMan") or {}
-            twelfth_man_pid = twelfth_man.get("playerId")
+            twelfth_man = team.get("twelfthMan")
+            twelfth_man_pid = None
+            if twelfth_man and isinstance(twelfth_man, dict) and twelfth_man.get("roundId") == round_id:
+                twelfth_man_pid = twelfth_man.get("playerId")
             
             pids = []
             for pos in POS_ORDER:
@@ -728,15 +743,27 @@ def api_league():
         try:
             team = fetch_team(round_id, uid, cookie)
             if team:
+                twelfth_man = team.get("twelfthMan")
+                if not is_booster_active(twelfth_man, round_id):
+                    twelfth_man = None
+
+                wildcard = team.get("wildCard")
+                if not is_booster_active(wildcard, round_id):
+                    wildcard = None
+
+                max_captain = team.get("maxCaptain") or team.get("maxCaptainBooster")
+                if not is_booster_active(max_captain, round_id):
+                    max_captain = None
+
                 teams[uid] = {
                     "roundPoints": team.get("roundPoints"),
                     "overallPoints": team.get("overallPoints"),
                     "value": team.get("value"),
                     "captain": team.get("captain"),
                     "vice": team.get("vice"),
-                    "twelfthMan": team.get("twelfthMan"),
-                    "wildCard": team.get("wildCard"),
-                    "maxCaptain": team.get("maxCaptain") or team.get("maxCaptainBooster"),
+                    "twelfthMan": twelfth_man,
+                    "wildCard": wildcard,
+                    "maxCaptain": max_captain,
                     "rows": build_squad_rows(team, store, round_id),
                 }
         except Exception:
