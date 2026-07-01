@@ -907,6 +907,7 @@
         <button class="tab-btn" onclick="switchTab('matches')">🗓 Match View</button>
         <button class="tab-btn" onclick="switchTab('picked')">🔥 Most Picked</button>
         <button class="tab-btn" onclick="switchTab('marjinal')">🃏 En Marjinal</button>
+        <button class="tab-btn" onclick="switchTab('twins')">👯 Twin Detector</button>
         <button class="tab-btn" onclick="switchTab('optimizer')">🔮 Squad Optimizer</button>
     </div>
 
@@ -1021,7 +1022,30 @@
     </div>
 
     <!-- ===================================================
-     TAB 5: SQUAD OPTIMIZER
+     TAB 5: TWIN DETECTOR
+     =================================================== -->
+    <div id="tab-twins" class="tab-content">
+        <div class="controls">
+            <label>Gameweek
+                <select id="tw-round-select" style="width:190px">
+                    <option value="overall">Overall (All GWs)</option>
+                    <option value="">Current round</option>
+                </select>
+            </label>
+            <button class="btn" onclick="loadTwins()">Detect Twins</button>
+        </div>
+        <div id="twins-body">
+            <div class="empty">
+                <div style="font-size:40px">👯</div>
+                <p>Press <strong>Detect Twins</strong> to rank manager pairs by how much their squads overlap</p>
+                <p style="margin-top:6px;font-size:12px;color:var(--muted)">Similarity = <strong>Jaccard index</strong>: shared players ÷ combined players.
+                    Two identical squads score 100%. Also counts how often a pair captained the same player. Requires server-side cookie configuration</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================
+     TAB 6: SQUAD OPTIMIZER
      =================================================== -->
     <div id="tab-optimizer" class="tab-content">
         <div class="split">
@@ -1098,6 +1122,7 @@
         let autoRefreshInterval = null;
         let mostPickedData = null;
         let marjinalData = null;
+        let twinsData = null;
 
         // ---------------------------------------------------------------------------
         // Init
@@ -1135,6 +1160,7 @@
                 'mv-round-select': '<option value="">All rounds</option>',
                 'mp-round-select': '<option value="">Current round</option>',
                 'mj-round-select': '<option value="overall">Overall (All GWs)</option><option value="">Current round</option>',
+                'tw-round-select': '<option value="overall">Overall (All GWs)</option><option value="">Current round</option>',
                 'opt-round-select': '<option value="total">Total Points (All GWs)</option>',
             };
             Object.keys(placeholders).forEach(id => {
@@ -1596,6 +1622,97 @@
 
         function toggleMarjinal(idx) {
             document.querySelectorAll(`#marjinal-table tr.mj-detail-row[data-parent="${idx}"]`).forEach(r => {
+                r.style.display = (r.style.display === 'none') ? 'table-row' : 'none';
+            });
+        }
+
+        // ---------------------------------------------------------------------------
+        // Twin Detector tab
+        // ---------------------------------------------------------------------------
+        function twinLabel(j) {
+            if (j >= 80) return '👯 Separated at birth';
+            if (j >= 60) return '🧬 Suspiciously similar';
+            if (j >= 40) return '🤝 Same energy';
+            if (j <= 10) return '🧊 Total strangers';
+            return '';
+        }
+
+        async function loadTwins() {
+            const roundId = document.getElementById('tw-round-select').value;
+            const body = document.getElementById('twins-body');
+            body.innerHTML = '<div class="loader">Detecting twins (fetching all teams…)</div>';
+            twinsData = null;
+
+            const data = await fetchJson(`/api/twins?round_id=${roundId}`);
+            if (!data) return;
+            if (data.error) { showToast(data.error, true); body.innerHTML = `<div class="empty"><p>${data.error}</p></div>`; return; }
+
+            twinsData = data;
+            renderTwins();
+        }
+
+        function renderTwins() {
+            const body = document.getElementById('twins-body');
+            if (!twinsData) return;
+
+            const pairs = twinsData.pairs || [];
+            const total = twinsData.total_managers || 0;
+            if (!pairs.length) {
+                body.innerHTML = '<div class="empty"><div style="font-size:40px">🕵️</div><p>Not enough squads to compare</p></div>';
+                return;
+            }
+
+            const isOverall = twinsData.overall;
+            const scopeLabel = isOverall
+                ? `Overall • ${twinsData.rounds_counted} GWs`
+                : `GW ${twinsData.round_id}`;
+            const maxJ = pairs[0]?.jaccard || 1;
+            const top = pairs[0];
+            const medals = ['🥇', '🥈', '🥉'];
+
+            let html = `<div class="mp-summary">${scopeLabel} • ${pairs.length} pairs across ${total} managers, ranked by squad overlap (Jaccard %${isOverall ? ', summed across gameweeks' : ''})</div>`;
+            html += `<div class="mp-summary" style="background:rgba(120,180,255,.08)">👯 <strong>${esc(top.a)}</strong> &amp; <strong>${esc(top.b)}</strong> are the league's twins — <strong>${top.jaccard}%</strong> identical squads${top.same_captain > 0 ? `, same captain ${top.same_captain}×` : ''}</div>`;
+
+            html += `<table id="twins-table"><thead><tr>
+        <th style="text-align:right">#</th><th>Pair</th>
+        <th>Squad overlap</th>
+        <th style="text-align:right" title="${isOverall ? 'Avg shared players per GW' : 'Shared players this GW'}">Shared</th>
+        <th style="text-align:right" title="Gameweeks they captained the same player">Same 👑</th>
+        <th></th>
+      </tr></thead><tbody>`;
+
+            pairs.forEach((p, i) => {
+                const barW = maxJ ? Math.round(p.jaccard / maxJ * 100) : 0;
+                const medal = medals[i] || '';
+                const tag = twinLabel(p.jaccard);
+                html += `<tr class="mj-row" onclick="toggleTwins(${i})" style="cursor:pointer">
+        <td class="mp-rank">${medal || (i + 1)}</td>
+        <td><strong>${esc(p.a)}</strong> <span style="color:var(--muted)">&amp;</span> <strong>${esc(p.b)}</strong>
+          ${tag ? `<div style="font-size:11px;color:var(--muted)">${tag}</div>` : ''}</td>
+        <td class="mp-pick">
+          <div class="mp-pick-bar"><div class="mp-pick-fill" style="width:${barW}%"></div></div>
+          <div class="mp-pick-label">${p.jaccard.toFixed(1)}%</div>
+        </td>
+        <td class="pts-cell">${isOverall ? p.shared.toFixed(1) : Math.round(p.shared)}</td>
+        <td class="pts-cell${p.same_captain > 0 ? ' good' : ''}">${p.same_captain}</td>
+        <td style="color:var(--muted);font-size:11px">▼ shared</td>
+      </tr>`;
+
+                (p.players || []).forEach(pl => {
+                    html += `<tr class="mj-detail-row" data-parent="${i}" style="display:none">
+          <td></td>
+          <td colspan="2"><span class="pos-badge pos-${pl.pos}">${esc(pl.pos)}</span> ${esc(pl.name)} <span style="color:var(--muted)">${esc(pl.country)}</span></td>
+          <td class="pts-cell" colspan="3" style="color:var(--muted)">${isOverall ? `shared ${pl.rounds} GW` : 'both own'}</td>
+        </tr>`;
+                });
+            });
+
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        }
+
+        function toggleTwins(idx) {
+            document.querySelectorAll(`#twins-table tr.mj-detail-row[data-parent="${idx}"]`).forEach(r => {
                 r.style.display = (r.style.display === 'none') ? 'table-row' : 'none';
             });
         }

@@ -1069,6 +1069,115 @@ def api_marjinal():
     })
 
 
+@app.route("/api/twins")
+def api_twins():
+    """'Twin Detector' — rank manager pairs by how similar their squads are.
+
+    For each unordered pair we measure squad overlap via the Jaccard index
+    (|A ∩ B| / |A ∪ B|). round_id="overall" sums intersections/unions across
+    every played gameweek; a numeric (or empty → current) round_id compares a
+    single gameweek. Also counts how often the pair captained the same player.
+    """
+    cookie = _load_cookie()
+    if not cookie:
+        return jsonify({"error": "No cookie configured on the server."}), 400
+
+    round_id_str = request.args.get("round_id", "")
+    overall = (round_id_str == "overall")
+    try:
+        league_id = int(request.args.get("league_id", DEFAULT_LEAGUE_ID))
+        round_id = None if overall or not round_id_str else int(round_id_str)
+    except ValueError:
+        return jsonify({"error": "Invalid parameters"}), 400
+
+    if overall:
+        round_ids = [r.get("id") for r in store.rounds
+                     if r.get("status") and r.get("status") != "scheduled"]
+        round_ids = round_ids or [store.current_round_id() or 1]
+    else:
+        round_ids = [round_id or store.current_round_id() or 1]
+
+    try:
+        managers = fetch_league(league_id, cookie)
+        owner_maps = {rid: get_owner_map(league_id, rid, cookie, managers) for rid in round_ids}
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    names = sorted({m.get("userName", f"User{m.get('userId')}") for m in managers})
+
+    # Per-round: manager → set of owned player ids, and manager → captain pid.
+    round_sets = {}   # rid → {name: set(pid)}
+    round_caps = {}   # rid → {name: captain_pid}
+    for rid, owner_map in owner_maps.items():
+        sets, caps = {}, {}
+        for pid, owners in owner_map.items():
+            for o in owners:
+                nm = o["name"]
+                sets.setdefault(nm, set()).add(pid)
+                if o.get("is_captain"):
+                    caps[nm] = pid
+        round_sets[rid] = sets
+        round_caps[rid] = caps
+
+    def _pos_key(pos):
+        return POS_ORDER.index(pos) if pos in POS_ORDER else len(POS_ORDER)
+
+    pairs = []
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            a, b = names[i], names[j]
+            total_shared = total_union = rounds_counted = same_captain = 0
+            shared_rounds = {}   # pid → number of gameweeks shared
+            for rid in round_ids:
+                sa = round_sets[rid].get(a)
+                sb = round_sets[rid].get(b)
+                if not sa or not sb:
+                    continue
+                rounds_counted += 1
+                inter = sa & sb
+                total_shared += len(inter)
+                total_union += len(sa | sb)
+                for pid in inter:
+                    shared_rounds[pid] = shared_rounds.get(pid, 0) + 1
+                ca, cb = round_caps[rid].get(a), round_caps[rid].get(b)
+                if ca is not None and ca == cb:
+                    same_captain += 1
+            if rounds_counted == 0:
+                continue
+
+            shared_players = []
+            for pid, cnt in shared_rounds.items():
+                p = store.player(pid)
+                shared_players.append({
+                    "name": store.player_name(pid),
+                    "pos": p.get("position", "?"),
+                    "country": store.squad_abbr(p.get("squadId")),
+                    "rounds": cnt,
+                })
+            shared_players.sort(key=lambda x: (-x["rounds"], _pos_key(x["pos"]), x["name"].lower()))
+
+            pairs.append({
+                "a": a,
+                "b": b,
+                "shared": round(total_shared / rounds_counted, 1),
+                "jaccard": round(total_shared / total_union * 100, 1) if total_union else 0.0,
+                "same_captain": same_captain,
+                "rounds_counted": rounds_counted,
+                "players": shared_players,
+            })
+
+    # Most alike first; tie-break by raw shared count, then names.
+    pairs.sort(key=lambda x: (-x["jaccard"], -x["shared"], x["a"].lower(), x["b"].lower()))
+
+    return jsonify({
+        "pairs": pairs,
+        "total_managers": len(managers),
+        "overall": overall,
+        "rounds_counted": len(round_ids),
+        "round_id": "overall" if overall else round_ids[0],
+    })
+
+
 @app.route("/api/optimize-squad")
 def api_optimize_squad():
     cookie = _load_cookie()
