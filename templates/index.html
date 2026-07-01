@@ -758,6 +758,38 @@
         }
 
         @media (max-width: 720px) {
+            header {
+                padding: 10px 14px;
+            }
+
+            header h1 {
+                font-size: 17px;
+            }
+
+            /* Tab bar: scroll sideways instead of blowing out page width */
+            .tabs {
+                padding: 0 10px;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+
+            .tabs::-webkit-scrollbar {
+                display: none;
+            }
+
+            .tab-btn {
+                padding: 10px 14px;
+                font-size: 13px;
+                white-space: nowrap;
+                flex: 0 0 auto;
+            }
+
+            .controls {
+                padding: 12px 14px;
+                gap: 8px;
+            }
+
             #tab-league .split {
                 grid-template-columns: 1fr;
                 height: auto;
@@ -769,7 +801,58 @@
                 max-height: 300px;
             }
 
+            #squad-panel {
+                padding: 12px 10px;
+            }
 
+            #squad-content {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            #squad-table {
+                min-width: 560px;
+            }
+
+            /* Match View: tighten spacing and drop secondary columns
+               (Price + Total) so the Managers column always fits */
+            #match-view-body {
+                padding: 12px 6px;
+            }
+
+            .squad-section {
+                padding: 0 4px 8px;
+            }
+
+            .player-table th,
+            .player-table td {
+                padding: 5px 5px;
+            }
+
+            .player-table th:nth-child(3),
+            .player-table td:nth-child(3),
+            .player-table th:nth-child(5),
+            .player-table td:nth-child(5) {
+                display: none;
+            }
+
+            .owner-badge {
+                font-size: 10px;
+                padding: 2px 6px;
+            }
+
+            /* Wide data tables scroll horizontally rather than clip off-screen */
+            #most-picked-body,
+            #marjinal-body {
+                padding: 12px 8px;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            #most-picked-table,
+            #marjinal-table {
+                min-width: 620px;
+            }
         }
 
         .opt-card {
