@@ -20,6 +20,7 @@ Static data auto-refreshes every 60 s while any match is live.
 
 import gzip
 import json
+import math
 import os
 import threading
 import time
@@ -949,6 +950,84 @@ def api_most_picked():
     return jsonify({
         "players": players,
         "total_managers": total_managers,
+        "round_id": use_rid,
+    })
+
+
+def rarity_score(k, n):
+    """Surprisal-based rarity for a player owned by k of n managers.
+
+    Scaled so a solo pick (k=1) is worth 10 points and a fully-owned
+    'template' player (k=n) is worth 0. Rewards uniqueness nonlinearly.
+    """
+    if n <= 1 or k <= 0 or k >= n:
+        return 0.0 if k >= n else 10.0
+    return 10.0 * math.log2(n / k) / math.log2(n)
+
+
+@app.route("/api/marjinal")
+def api_marjinal():
+    """'En Marjinal' — rank managers by how off-template (unique) their squad is."""
+    cookie = _load_cookie()
+    if not cookie:
+        return jsonify({"error": "No cookie configured on the server."}), 400
+    try:
+        league_id = int(request.args.get("league_id", DEFAULT_LEAGUE_ID))
+        round_id_str = request.args.get("round_id", "")
+        round_id = int(round_id_str) if round_id_str else None
+    except ValueError:
+        return jsonify({"error": "Invalid parameters"}), 400
+
+    use_rid = round_id or store.current_round_id() or 1
+    try:
+        managers = fetch_league(league_id, cookie)
+        owner_map = get_owner_map(league_id, use_rid, cookie, managers)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    n = len(managers)
+
+    # Seed every manager so all appear even with a 0 score.
+    mgr_stats = {}
+    for m in managers:
+        name = m.get("userName", f"User{m.get('userId')}")
+        mgr_stats[name] = {"name": name, "score": 0.0, "solo": 0, "breakdown": []}
+
+    for pid, owners in owner_map.items():
+        k = len(owners)
+        rarity = rarity_score(k, n)
+        p = store.player(pid)
+        entry = {
+            "pid": pid,
+            "name": store.player_name(pid),
+            "pos": p.get("position", "?"),
+            "country": store.squad_abbr(p.get("squadId")),
+            "owners": k,
+            "rarity": round(rarity, 2),
+            "gwPts": store.player_round_points(pid, use_rid),
+        }
+        for o in owners:
+            st = mgr_stats.get(o["name"])
+            if st is None:
+                st = mgr_stats.setdefault(
+                    o["name"], {"name": o["name"], "score": 0.0, "solo": 0, "breakdown": []}
+                )
+            st["score"] += rarity
+            if k == 1:
+                st["solo"] += 1
+            st["breakdown"].append({**entry, "is_captain": o.get("is_captain"),
+                                     "is_twelfth_man": o.get("is_twelfth_man")})
+
+    ranking = list(mgr_stats.values())
+    for st in ranking:
+        st["score"] = round(st["score"], 1)
+        st["breakdown"].sort(key=lambda x: (-x["rarity"], x["name"].lower()))
+    # Most marjinal first; tie-break by solo picks, then name.
+    ranking.sort(key=lambda x: (-x["score"], -x["solo"], x["name"].lower()))
+
+    return jsonify({
+        "ranking": ranking,
+        "total_managers": n,
         "round_id": use_rid,
     })
 

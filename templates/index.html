@@ -592,18 +592,21 @@
             padding: 16px 20px;
         }
 
-        #mp-summary {
+        #mp-summary,
+        .mp-summary {
             color: var(--muted);
             font-size: 13px;
             margin-bottom: 12px;
         }
 
-        #most-picked-table {
+        #most-picked-table,
+        #marjinal-table {
             width: 100%;
             border-collapse: collapse;
         }
 
-        #most-picked-table th {
+        #most-picked-table th,
+        #marjinal-table th {
             padding: 8px 10px;
             text-align: left;
             font-size: 11px;
@@ -616,14 +619,26 @@
             z-index: 1;
         }
 
-        #most-picked-table td {
+        #most-picked-table td,
+        #marjinal-table td {
             padding: 9px 10px;
             border-bottom: 1px solid var(--border);
             vertical-align: middle;
         }
 
-        #most-picked-table tr:hover td {
+        #most-picked-table tr:hover td,
+        #marjinal-table tr:hover td {
             background: var(--card);
+        }
+
+        #marjinal-table tr.mj-detail-row td {
+            background: var(--surface);
+            font-size: 12px;
+            padding: 6px 10px;
+        }
+
+        #marjinal-table tr.mj-row td {
+            border-top: 2px solid var(--border);
         }
 
         .mp-rank {
@@ -808,6 +823,7 @@
         <button class="tab-btn active" onclick="switchTab('league')">📊 League Tracker</button>
         <button class="tab-btn" onclick="switchTab('matches')">🗓 Match View</button>
         <button class="tab-btn" onclick="switchTab('picked')">🔥 Most Picked</button>
+        <button class="tab-btn" onclick="switchTab('marjinal')">🃏 En Marjinal</button>
         <button class="tab-btn" onclick="switchTab('optimizer')">🔮 Squad Optimizer</button>
     </div>
 
@@ -899,7 +915,29 @@
     </div>
 
     <!-- ===================================================
-     TAB 4: SQUAD OPTIMIZER
+     TAB 4: EN MARJINAL
+     =================================================== -->
+    <div id="tab-marjinal" class="tab-content">
+        <div class="controls">
+            <label>Gameweek
+                <select id="mj-round-select" style="width:190px">
+                    <option value="">Current round</option>
+                </select>
+            </label>
+            <button class="btn" onclick="loadMarjinal()">Load En Marjinal</button>
+        </div>
+        <div id="marjinal-body">
+            <div class="empty">
+                <div style="font-size:40px">🃏</div>
+                <p>Press <strong>Load En Marjinal</strong> to rank managers by how off-template (unique) their squad is</p>
+                <p style="margin-top:6px;font-size:12px;color:var(--muted)">Each squad player scores <strong>log₂(N ÷ owners)</strong> rarity points —
+                    a solo pick is worth 10, a player everyone owns is worth 0. Requires server-side cookie configuration</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================
+     TAB 5: SQUAD OPTIMIZER
      =================================================== -->
     <div id="tab-optimizer" class="tab-content">
         <div class="split">
@@ -975,6 +1013,7 @@
         let selectedManagerId = null;
         let autoRefreshInterval = null;
         let mostPickedData = null;
+        let marjinalData = null;
 
         // ---------------------------------------------------------------------------
         // Init
@@ -1011,6 +1050,7 @@
                 'round-select': '',
                 'mv-round-select': '<option value="">All rounds</option>',
                 'mp-round-select': '<option value="">Current round</option>',
+                'mj-round-select': '<option value="">Current round</option>',
                 'opt-round-select': '<option value="total">Total Points (All GWs)</option>',
             };
             Object.keys(placeholders).forEach(id => {
@@ -1389,6 +1429,84 @@
 
             html += '</tbody></table>';
             body.innerHTML = html;
+        }
+
+        // ---------------------------------------------------------------------------
+        // En Marjinal tab
+        // ---------------------------------------------------------------------------
+        async function loadMarjinal() {
+            const roundId = document.getElementById('mj-round-select').value;
+            const body = document.getElementById('marjinal-body');
+            body.innerHTML = '<div class="loader">Loading en marjinal (fetching all teams…)</div>';
+            marjinalData = null;
+
+            const data = await fetchJson(`/api/marjinal?round_id=${roundId}`);
+            if (!data) return;
+            if (data.error) { showToast(data.error, true); body.innerHTML = `<div class="empty"><p>${data.error}</p></div>`; return; }
+
+            marjinalData = data;
+            renderMarjinal();
+        }
+
+        function renderMarjinal() {
+            const body = document.getElementById('marjinal-body');
+            if (!marjinalData) return;
+
+            const total = marjinalData.total_managers || 0;
+            const ranking = marjinalData.ranking || [];
+            if (!ranking.length) {
+                body.innerHTML = '<div class="empty"><div style="font-size:40px">📭</div><p>No managers found</p></div>';
+                return;
+            }
+
+            const maxScore = ranking[0]?.score || 1;
+            const medals = ['🥇', '🥈', '🥉'];
+
+            let html = `<div class="mp-summary">GW ${marjinalData.round_id} • ${total} managers ranked by squad rarity (log₂(N ÷ owners) per player)</div>`;
+            html += `<table id="marjinal-table"><thead><tr>
+        <th style="text-align:right">#</th><th>Manager</th>
+        <th>Rarity score</th>
+        <th style="text-align:right" title="Players only this manager owns">Solo picks</th>
+        <th></th>
+      </tr></thead><tbody>`;
+
+            ranking.forEach((m, i) => {
+                const barW = maxScore ? Math.round(m.score / maxScore * 100) : 0;
+                const medal = medals[i] || '';
+                html += `<tr class="mj-row" onclick="toggleMarjinal(${i})" style="cursor:pointer">
+        <td class="mp-rank">${medal || (i + 1)}</td>
+        <td><strong>${esc(m.name)}</strong></td>
+        <td class="mp-pick">
+          <div class="mp-pick-bar"><div class="mp-pick-fill" style="width:${barW}%"></div></div>
+          <div class="mp-pick-label">${m.score.toFixed(1)} pts</div>
+        </td>
+        <td class="pts-cell${m.solo > 0 ? ' good' : ''}">${m.solo}</td>
+        <td style="color:var(--muted);font-size:11px">▼ breakdown</td>
+      </tr>`;
+
+                (m.breakdown || []).forEach(p => {
+                    const badge = p.is_captain ? ' 👑' : (p.is_twelfth_man ? ' 🏃' : '');
+                    const soloTag = p.owners === 1
+                        ? '<span class="owner-badge owner-captain" title="Only you own this player">SOLO</span>'
+                        : `${p.owners} / ${total}`;
+                    html += `<tr class="mj-detail-row" data-parent="${i}" style="display:none">
+          <td></td>
+          <td><span class="pos-badge pos-${p.pos}">${esc(p.pos)}</span> ${esc(p.name)}${badge} <span style="color:var(--muted)">${esc(p.country)}</span></td>
+          <td style="color:var(--muted)">owned by ${soloTag}</td>
+          <td class="pts-cell">+${p.rarity.toFixed(1)}</td>
+          <td class="pts-cell${(p.gwPts || 0) >= 8 ? ' good' : ''}">${p.gwPts ?? '—'} GW</td>
+        </tr>`;
+                });
+            });
+
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        }
+
+        function toggleMarjinal(idx) {
+            document.querySelectorAll(`#marjinal-table tr.mj-detail-row[data-parent="${idx}"]`).forEach(r => {
+                r.style.display = (r.style.display === 'none') ? 'table-row' : 'none';
+            });
         }
 
         // ---------------------------------------------------------------------------
