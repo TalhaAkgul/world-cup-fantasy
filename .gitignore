@@ -220,8 +220,8 @@ __marimo__/
 # FIFA cookie local backup
 cookie.txt
 
-# Per-player stats cache (regenerable, rewritten as rounds complete)
-fifa_cache/player_stats.json
+# Cached FIFA API data — all regenerable on boot (public, no cookie needed)
+fifa_cache/
 
 # Local tools and debug captures
 selenium_error.png
