@@ -921,6 +921,7 @@
         <div class="controls">
             <label>Gameweek
                 <select id="mj-round-select" style="width:190px">
+                    <option value="overall">Overall (All GWs)</option>
                     <option value="">Current round</option>
                 </select>
             </label>
@@ -1050,7 +1051,7 @@
                 'round-select': '',
                 'mv-round-select': '<option value="">All rounds</option>',
                 'mp-round-select': '<option value="">Current round</option>',
-                'mj-round-select': '<option value="">Current round</option>',
+                'mj-round-select': '<option value="overall">Overall (All GWs)</option><option value="">Current round</option>',
                 'opt-round-select': '<option value="total">Total Points (All GWs)</option>',
             };
             Object.keys(placeholders).forEach(id => {
@@ -1462,7 +1463,11 @@
             const maxScore = ranking[0]?.score || 1;
             const medals = ['🥇', '🥈', '🥉'];
 
-            let html = `<div class="mp-summary">GW ${marjinalData.round_id} • ${total} managers ranked by squad rarity (log₂(N ÷ owners) per player)</div>`;
+            const isOverall = marjinalData.overall;
+            const scopeLabel = isOverall
+                ? `Overall • ${marjinalData.rounds_counted} GWs`
+                : `GW ${marjinalData.round_id}`;
+            let html = `<div class="mp-summary">${scopeLabel} • ${total} managers ranked by squad rarity (log₂(N ÷ owners) per player${isOverall ? ', summed across gameweeks' : ''})</div>`;
             html += `<table id="marjinal-table"><thead><tr>
         <th style="text-align:right">#</th><th>Manager</th>
         <th>Rarity score</th>
@@ -1487,14 +1492,17 @@
                 (m.breakdown || []).forEach(p => {
                     const badge = p.is_captain ? ' 👑' : (p.is_twelfth_man ? ' 🏃' : '');
                     const soloTag = p.owners === 1
-                        ? '<span class="owner-badge owner-captain" title="Only you own this player">SOLO</span>'
+                        ? `<span class="owner-badge owner-captain" title="${isOverall ? 'Solo pick in at least one GW' : 'Only you own this player'}">SOLO</span>`
                         : `${p.owners} / ${total}`;
+                    const ownLabel = isOverall
+                        ? `rarest ${soloTag} · held ${p.rounds} GW`
+                        : `owned by ${soloTag}`;
                     html += `<tr class="mj-detail-row" data-parent="${i}" style="display:none">
           <td></td>
           <td><span class="pos-badge pos-${p.pos}">${esc(p.pos)}</span> ${esc(p.name)}${badge} <span style="color:var(--muted)">${esc(p.country)}</span></td>
-          <td style="color:var(--muted)">owned by ${soloTag}</td>
+          <td style="color:var(--muted)">${ownLabel}</td>
           <td class="pts-cell">+${p.rarity.toFixed(1)}</td>
-          <td class="pts-cell${(p.gwPts || 0) >= 8 ? ' good' : ''}">${p.gwPts ?? '—'} GW</td>
+          <td class="pts-cell${(p.gwPts || 0) >= 8 ? ' good' : ''}">${p.gwPts ?? '—'} ${isOverall ? 'pts' : 'GW'}</td>
         </tr>`;
                 });
             });

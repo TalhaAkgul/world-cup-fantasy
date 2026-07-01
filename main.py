@@ -967,21 +967,33 @@ def rarity_score(k, n):
 
 @app.route("/api/marjinal")
 def api_marjinal():
-    """'En Marjinal' — rank managers by how off-template (unique) their squad is."""
+    """'En Marjinal' — rank managers by how off-template (unique) their squad is.
+
+    round_id="overall" aggregates rarity across every played gameweek; a numeric
+    (or empty → current) round_id scores just that gameweek.
+    """
     cookie = _load_cookie()
     if not cookie:
         return jsonify({"error": "No cookie configured on the server."}), 400
+
+    round_id_str = request.args.get("round_id", "")
+    overall = (round_id_str == "overall")
     try:
         league_id = int(request.args.get("league_id", DEFAULT_LEAGUE_ID))
-        round_id_str = request.args.get("round_id", "")
-        round_id = int(round_id_str) if round_id_str else None
+        round_id = None if overall or not round_id_str else int(round_id_str)
     except ValueError:
         return jsonify({"error": "Invalid parameters"}), 400
 
-    use_rid = round_id or store.current_round_id() or 1
+    if overall:
+        round_ids = [r.get("id") for r in store.rounds
+                     if r.get("status") and r.get("status") != "scheduled"]
+        round_ids = round_ids or [store.current_round_id() or 1]
+    else:
+        round_ids = [round_id or store.current_round_id() or 1]
+
     try:
         managers = fetch_league(league_id, cookie)
-        owner_map = get_owner_map(league_id, use_rid, cookie, managers)
+        owner_maps = {rid: get_owner_map(league_id, rid, cookie, managers) for rid in round_ids}
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
@@ -991,44 +1003,69 @@ def api_marjinal():
     mgr_stats = {}
     for m in managers:
         name = m.get("userName", f"User{m.get('userId')}")
-        mgr_stats[name] = {"name": name, "score": 0.0, "solo": 0, "breakdown": []}
+        mgr_stats[name] = {"name": name, "score": 0.0, "solo": 0, "players": {}}
 
-    for pid, owners in owner_map.items():
-        k = len(owners)
-        rarity = rarity_score(k, n)
-        p = store.player(pid)
-        entry = {
-            "pid": pid,
-            "name": store.player_name(pid),
-            "pos": p.get("position", "?"),
-            "country": store.squad_abbr(p.get("squadId")),
-            "owners": k,
-            "rarity": round(rarity, 2),
-            "gwPts": store.player_round_points(pid, use_rid),
-        }
-        for o in owners:
-            st = mgr_stats.get(o["name"])
-            if st is None:
-                st = mgr_stats.setdefault(
-                    o["name"], {"name": o["name"], "score": 0.0, "solo": 0, "breakdown": []}
-                )
-            st["score"] += rarity
-            if k == 1:
-                st["solo"] += 1
-            st["breakdown"].append({**entry, "is_captain": o.get("is_captain"),
-                                     "is_twelfth_man": o.get("is_twelfth_man")})
+    def _stat(name):
+        st = mgr_stats.get(name)
+        if st is None:
+            st = mgr_stats.setdefault(
+                name, {"name": name, "score": 0.0, "solo": 0, "players": {}})
+        return st
 
-    ranking = list(mgr_stats.values())
-    for st in ranking:
-        st["score"] = round(st["score"], 1)
-        st["breakdown"].sort(key=lambda x: (-x["rarity"], x["name"].lower()))
+    for rid, owner_map in owner_maps.items():
+        for pid, owners in owner_map.items():
+            k = len(owners)
+            rarity = rarity_score(k, n)
+            gw = store.player_round_points(pid, rid)
+            for o in owners:
+                st = _stat(o["name"])
+                st["score"] += rarity
+                if k == 1:
+                    st["solo"] += 1
+                p = store.player(pid)
+                pl = st["players"].get(pid)
+                if pl is None:
+                    pl = st["players"][pid] = {
+                        "pid": pid,
+                        "name": store.player_name(pid),
+                        "pos": p.get("position", "?"),
+                        "country": store.squad_abbr(p.get("squadId")),
+                        "owners": k,      # best (rarest) ownership seen while held
+                        "rarity": 0.0,    # total rarity contributed
+                        "rounds": 0,      # gameweeks held
+                        "gwPts": 0,
+                        "is_captain": False,
+                        "is_twelfth_man": False,
+                    }
+                pl["rarity"] += rarity
+                pl["rounds"] += 1
+                pl["owners"] = min(pl["owners"], k)
+                if gw is not None:
+                    pl["gwPts"] += gw
+                pl["is_captain"] = pl["is_captain"] or bool(o.get("is_captain"))
+                pl["is_twelfth_man"] = pl["is_twelfth_man"] or bool(o.get("is_twelfth_man"))
+
+    ranking = []
+    for st in mgr_stats.values():
+        breakdown = list(st["players"].values())
+        for pl in breakdown:
+            pl["rarity"] = round(pl["rarity"], 2)
+        breakdown.sort(key=lambda x: (-x["rarity"], x["name"].lower()))
+        ranking.append({
+            "name": st["name"],
+            "score": round(st["score"], 1),
+            "solo": st["solo"],
+            "breakdown": breakdown,
+        })
     # Most marjinal first; tie-break by solo picks, then name.
     ranking.sort(key=lambda x: (-x["score"], -x["solo"], x["name"].lower()))
 
     return jsonify({
         "ranking": ranking,
         "total_managers": n,
-        "round_id": use_rid,
+        "overall": overall,
+        "rounds_counted": len(round_ids),
+        "round_id": "overall" if overall else round_ids[0],
     })
 
 
