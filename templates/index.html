@@ -674,6 +674,75 @@
             font-variant-numeric: tabular-nums;
         }
 
+        /* Awards tab */
+        .award-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 14px;
+        }
+
+        .award-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+        }
+
+        .award-card h3 {
+            margin: 0;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .award-card .award-sub {
+            color: var(--muted);
+            font-size: 12px;
+            margin: 2px 0 10px;
+        }
+
+        .award-leader {
+            background: var(--surface);
+            border: 1px solid var(--gold-dim);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .award-leader .aw-name {
+            font-weight: 700;
+            color: var(--gold);
+        }
+
+        .award-row {
+            display: grid;
+            grid-template-columns: 18px 1fr auto;
+            gap: 8px;
+            align-items: center;
+            padding: 4px 0;
+            font-size: 13px;
+        }
+
+        .award-row .aw-rank {
+            color: var(--muted);
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+        }
+
+        .award-row .aw-val {
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+            white-space: nowrap;
+        }
+
+        .award-detail {
+            color: var(--muted);
+            font-size: 11px;
+            margin: 1px 0 0 26px;
+        }
+
         .mp-owners {
             display: flex;
             gap: 4px;
@@ -908,6 +977,7 @@
         <button class="tab-btn" onclick="switchTab('picked')">🔥 Most Picked</button>
         <button class="tab-btn" onclick="switchTab('marjinal')">🃏 En Marjinal</button>
         <button class="tab-btn" onclick="switchTab('twins')">👯 Twin Detector</button>
+        <button class="tab-btn" onclick="switchTab('awards')">🏅 Awards</button>
         <button class="tab-btn" onclick="switchTab('optimizer')">🔮 Squad Optimizer</button>
     </div>
 
@@ -1045,7 +1115,30 @@
     </div>
 
     <!-- ===================================================
-     TAB 6: SQUAD OPTIMIZER
+     TAB 6: AWARDS
+     =================================================== -->
+    <div id="tab-awards" class="tab-content">
+        <div class="controls">
+            <label>Gameweek
+                <select id="aw-round-select" style="width:190px">
+                    <option value="overall">Overall (All GWs)</option>
+                    <option value="">Current round</option>
+                </select>
+            </label>
+            <button class="btn" onclick="loadAwards()">Load Awards</button>
+        </div>
+        <div id="awards-body">
+            <div class="empty">
+                <div style="font-size:40px">🏅</div>
+                <p>Press <strong>Load Awards</strong> to see which manager earned the most from each category</p>
+                <p style="margin-top:6px;font-size:12px;color:var(--muted)">Each owned player's points are split by source (goals, clean sheets, assists, saves, cards…) using the
+                    official FIFA scoring rules; your captain's contribution counts double. Only computed for finished gameweeks. Requires server-side cookie configuration</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================
+     TAB 7: SQUAD OPTIMIZER
      =================================================== -->
     <div id="tab-optimizer" class="tab-content">
         <div class="split">
@@ -1123,6 +1216,7 @@
         let mostPickedData = null;
         let marjinalData = null;
         let twinsData = null;
+        let awardsData = null;
 
         // ---------------------------------------------------------------------------
         // Init
@@ -1161,6 +1255,7 @@
                 'mp-round-select': '<option value="">Current round</option>',
                 'mj-round-select': '<option value="overall">Overall (All GWs)</option><option value="">Current round</option>',
                 'tw-round-select': '<option value="overall">Overall (All GWs)</option><option value="">Current round</option>',
+                'aw-round-select': '<option value="overall">Overall (Finished GWs)</option>',
                 'opt-round-select': '<option value="total">Total Points (All GWs)</option>',
             };
             Object.keys(placeholders).forEach(id => {
@@ -1168,6 +1263,8 @@
                 if (!sel) return;
                 sel.innerHTML = placeholders[id];
                 rounds.forEach(r => {
+                    // Awards are post-gameweek only — list finished rounds exclusively.
+                    if (id === 'aw-round-select' && r.status !== 'complete') return;
                     const opt = document.createElement('option');
                     opt.value = r.id;
                     opt.textContent = `GW ${r.id}${r.status ? '  (' + r.status + ')' : ''}`;
@@ -1715,6 +1812,89 @@
             document.querySelectorAll(`#twins-table tr.mj-detail-row[data-parent="${idx}"]`).forEach(r => {
                 r.style.display = (r.style.display === 'none') ? 'table-row' : 'none';
             });
+        }
+
+        // ---------------------------------------------------------------------------
+        // Awards tab
+        // ---------------------------------------------------------------------------
+        async function loadAwards() {
+            const roundId = document.getElementById('aw-round-select').value;
+            const body = document.getElementById('awards-body');
+            body.innerHTML = '<div class="loader">Handing out awards (fetching teams &amp; player stats…)</div>';
+            awardsData = null;
+
+            const data = await fetchJson(`/api/awards?round_id=${roundId}`);
+            if (!data) return;
+            if (data.error) { showToast(data.error, true); body.innerHTML = `<div class="empty"><p>${data.error}</p></div>`; return; }
+            if (data.pending) {
+                body.innerHTML = `<div class="empty"><div style="font-size:40px">⏳</div><p>${esc(data.message || 'Awards not available yet.')}</p></div>`;
+                return;
+            }
+
+            awardsData = data;
+            renderAwards();
+        }
+
+        function renderAwards() {
+            const body = document.getElementById('awards-body');
+            if (!awardsData) return;
+
+            const cats = awardsData.categories || [];
+            if (!cats.length) {
+                body.innerHTML = '<div class="empty"><div style="font-size:40px">📭</div><p>No award data available</p></div>';
+                return;
+            }
+
+            const isOverall = awardsData.overall;
+            const scopeLabel = isOverall
+                ? `Overall • ${awardsData.rounds_counted} GWs`
+                : `GW ${awardsData.round_id}`;
+
+            let html = `<div class="mp-summary">${scopeLabel} • ${awardsData.total_managers} managers • points split by source per official FIFA scoring (captain ×2, or vice-captain if the captain didn't play)</div>`;
+            html += '<div class="award-grid">';
+
+            cats.forEach(cat => {
+                const rows = cat.ranking || [];
+                // What we sort/label by: cards rank on count, everything else on points.
+                const valOf = r => cat.by_count ? r.count : r.points;
+                const maxVal = Math.max(1, ...rows.map(r => Math.abs(valOf(r))));
+                const leader = rows[0];
+                const fmtVal = r => cat.by_count
+                    ? `${r.count} ${cat.unit} · ${r.points} pts`
+                    : `${r.points} pts · ${r.count} ${cat.unit}`;
+
+                html += `<div class="award-card">
+          <h3><span>${cat.emoji}</span> ${esc(cat.title)}</h3>
+          <div class="award-sub">${esc(cat.subtitle)}</div>`;
+
+                if (leader && (leader.count || leader.points)) {
+                    const best = (leader.players || [])[0];
+                    html += `<div class="award-leader">🥇 <span class="aw-name">${esc(leader.name)}</span> — ${fmtVal(leader)}
+              ${best ? `<div class="award-detail">top: ${esc(best.name)} (${esc(best.country)})${best.cap ? ' 👑' : ''} · ${best.count} ${cat.unit}</div>` : ''}
+            </div>`;
+                } else {
+                    html += `<div class="award-leader" style="border-color:var(--border)">No ${cat.unit} recorded yet</div>`;
+                }
+
+                rows.slice(0, 8).forEach((r, i) => {
+                    const w = Math.round(Math.abs(valOf(r)) / maxVal * 100);
+                    const players = (r.players || []).map(p =>
+                        `${esc(p.name)}${p.cap ? ' 👑' : ''} ${p.count}`).join(', ');
+                    html += `<div class="award-row" title="${esc(players)}">
+              <span class="aw-rank">${i + 1}</span>
+              <div>
+                <div>${esc(r.name)}</div>
+                <div class="mp-pick-bar" style="margin-top:3px"><div class="mp-pick-fill" style="width:${w}%"></div></div>
+              </div>
+              <span class="aw-val">${fmtVal(r)}</span>
+            </div>`;
+                });
+
+                html += '</div>';
+            });
+
+            html += '</div>';
+            body.innerHTML = html;
         }
 
         // ---------------------------------------------------------------------------

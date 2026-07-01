@@ -292,6 +292,17 @@ def fetch_team(round_id, user_id, cookie):
     return data.get("success")
 
 
+def fetch_player_stats(pid):
+    """Per-player, per-round stat breakdown (public, no auth).
+
+    Returns a list of {"roundId", "points", "stats": {GS, AS, CS, ...}} records —
+    the raw event counts behind each round's fantasy total.
+    """
+    url = f"{BASE}/json/fantasy/player_stats/{pid}.json"
+    data = http_get_json(url)
+    return data if isinstance(data, list) else []
+
+
 def get_player_fixtures(squad_id, round_id, store):
     fixtures = []
     if not squad_id:
@@ -452,6 +463,103 @@ def get_owner_map(league_id, round_id, cookie, managers):
     with _owner_cache_lock:
         _owner_cache[key] = (now, om)
     return om
+
+
+# ---------------------------------------------------------------------------
+# Disk-backed cache for per-player stat breakdowns (for the Awards tab)
+#
+# Player stats only change while a match is live, and finished rounds are
+# immutable — so we persist them to fifa_cache/player_stats.json and re-fetch a
+# player only when (a) a match is currently live, (b) a new round has completed
+# since we cached them, or (c) the cached copy was taken mid-match. Outside
+# match hours this means zero API calls after the first load.
+# ---------------------------------------------------------------------------
+_STATS_CACHE_FILE = os.path.join(CACHE_DIR, "player_stats.json")
+_stats_cache: dict = {}  # pid → {"ts", "played", "live", "data"}
+_stats_cache_lock = threading.Lock()
+_stats_cache_loaded = False
+
+
+def _finished_round_count():
+    return sum(1 for r in store.rounds if r.get("status") == "complete")
+
+
+def _load_stats_cache():
+    global _stats_cache_loaded
+    with _stats_cache_lock:
+        if _stats_cache_loaded:
+            return
+        _stats_cache_loaded = True
+        try:
+            with open(_STATS_CACHE_FILE, encoding="utf-8") as f:
+                disk = json.load(f)
+            for k, v in disk.items():
+                _stats_cache[int(k)] = v
+        except Exception:
+            pass
+
+
+def _save_stats_cache():
+    with _stats_cache_lock:
+        snapshot = {str(pid): v for pid, v in _stats_cache.items()}
+    tmp = _STATS_CACHE_FILE + ".tmp"
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f)
+        os.replace(tmp, _STATS_CACHE_FILE)
+    except Exception:
+        pass
+
+
+def clear_stats_cache():
+    with _stats_cache_lock:
+        _stats_cache.clear()
+    _save_stats_cache()
+
+
+def _stats_fresh(entry, finished):
+    if not entry or entry.get("data") is None:
+        return False
+    # Finished-round stats are immutable, so a cached copy stays fresh until a
+    # new round completes (or a manual refresh clears the cache).
+    return entry.get("finished", -1) >= finished
+
+
+def get_player_stats_map(pids):
+    """pid → [round records], fetched in parallel, cached in memory and on disk.
+
+    One fetch per player covers every round, so callers can slice by round_id.
+    Since the Awards tab only ever asks about completed rounds, a player is
+    re-fetched only when a new round has finished since we last cached them.
+    """
+    _load_stats_cache()
+    finished = _finished_round_count()
+    now = time.time()
+    result, missing = {}, []
+    with _stats_cache_lock:
+        for pid in pids:
+            entry = _stats_cache.get(pid)
+            if _stats_fresh(entry, finished):
+                result[pid] = entry["data"]
+            else:
+                missing.append(pid)
+
+    def _one(pid):
+        try:
+            return pid, fetch_player_stats(pid)
+        except Exception:
+            return pid, None
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            for pid, data in ex.map(_one, missing):
+                if data is not None:
+                    with _stats_cache_lock:
+                        _stats_cache[pid] = {"ts": now, "finished": finished, "data": data}
+                    result[pid] = data
+        _save_stats_cache()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -648,6 +756,7 @@ def api_refresh():
             store.load_static(force=True)
             with _owner_cache_lock:
                 _owner_cache.clear()
+            clear_stats_cache()
         except Exception as e:
             print(f"[manual-refresh] {e}", flush=True)
     threading.Thread(target=do, daemon=True).start()
@@ -1171,6 +1280,209 @@ def api_twins():
 
     return jsonify({
         "pairs": pairs,
+        "total_managers": len(managers),
+        "overall": overall,
+        "rounds_counted": len(round_ids),
+        "round_id": "overall" if overall else round_ids[0],
+    })
+
+
+# FIFA WC Fantasy 2026 scoring — validated to reproduce the feed's per-round
+# totals exactly (409/409 player-rounds). Position-dependent goal/CS values.
+_GOAL_PTS = {"GK": 9, "DEF": 7, "MID": 6, "FWD": 5}
+_CS_PTS = {"GK": 5, "DEF": 5, "MID": 1}  # FWD earn nothing; needs 60+ min
+
+
+def award_breakdown(pos, s):
+    """Split a player's round into award buckets → (points, event_count).
+
+    Only the categories the Awards tab ranks on; mirrors the validated scoring
+    rules (clean sheet requires 60+ minutes; keeper saves score 1 per 3).
+    """
+    out = {}
+    mp = s.get("MP", 0) or 0
+    gs = s.get("GS", 0) or 0
+    if gs and pos in _GOAL_PTS:
+        out["goals"] = (gs * _GOAL_PTS[pos], gs)
+    cs = s.get("CS", 0) or 0
+    if cs and mp >= 60 and pos in _CS_PTS:
+        out["clean_sheet"] = (_CS_PTS[pos], 1)
+    a = s.get("AS", 0) or 0
+    if a:
+        out["assists"] = (a * 3, a)
+    if pos == "GK":
+        sv = s.get("S", 0) or 0
+        ps = s.get("PS", 0) or 0
+        pts = sv // 3 + ps * 3
+        cnt = sv + ps
+        if pts or cnt:
+            out["saves"] = (pts, cnt)
+    pw = s.get("PW", 0) or 0
+    if pw:
+        out["pens_won"] = (pw * 2, pw)
+    sb = s.get("SB", 0) or 0
+    if sb:
+        out["scouting"] = (sb * 2, sb)
+    if pos == "MID":
+        t = s.get("T", 0) or 0
+        cc = s.get("CC", 0) or 0
+        pts = t // 3 + cc // 2
+        if t or cc:
+            out["workrate"] = (pts, t + cc)
+    yc = s.get("YC", 0) or 0
+    rc = s.get("RC", 0) or 0
+    og = s.get("OG", 0) or 0
+    if yc or rc or og:
+        out["discipline"] = (-(yc + 2 * rc + 2 * og), yc + rc + og)
+    return out
+
+
+# (key, title, subtitle, unit, emoji, rank_by_count) — evocative titles; the
+# subtitle underneath carries the plain explanation.
+_AWARDS = [
+    ("goals",       "Golden Boot",   "Points earned from goals scored",                     "goals",        "⚽", False),
+    ("clean_sheet", "The Great Wall", "Points earned from clean sheets",                    "clean sheets", "🧤", False),
+    ("assists",     "The Playmaker", "Points earned from assists",                          "assists",      "🅰️", False),
+    ("saves",       "Safe Hands",    "Points from keeper saves & penalty stops",            "saves",        "🧱", False),
+    ("pens_won",    "Penalty Winner", "Points earned from winning penalties",               "pens won",     "🎯", False),
+    ("scouting",    "The Scout",     "Scouting bonuses from differentials (<5% owned)",     "scout picks",  "🔍", False),
+    ("workrate",    "Engine Room",   "Points from midfield tackles & big chances created",  "actions",      "🏃", False),
+    ("discipline",  "The Villain",   "Points lost to cards and own goals",                  "cards",        "🟥", True),
+]
+
+
+@app.route("/api/awards")
+def api_awards():
+    """Per-category 'awards' — attribute each player's category points to the
+    managers who owned them (captain ×2). Awards are only computed for *completed*
+    gameweeks; round_id='overall' sums across all finished rounds, a numeric
+    round_id scores that one (if finished), and empty → latest finished round.
+    """
+    cookie = _load_cookie()
+    if not cookie:
+        return jsonify({"error": "No cookie configured on the server."}), 400
+
+    round_id_str = request.args.get("round_id", "")
+    overall = (round_id_str == "overall")
+    try:
+        league_id = int(request.args.get("league_id", DEFAULT_LEAGUE_ID))
+        round_id = None if overall or not round_id_str else int(round_id_str)
+    except ValueError:
+        return jsonify({"error": "Invalid parameters"}), 400
+
+    finished_ids = [r.get("id") for r in store.rounds if r.get("status") == "complete"]
+
+    if overall:
+        if not finished_ids:
+            return jsonify({"pending": True,
+                            "message": "Awards unlock once the first gameweek is complete."})
+        round_ids = finished_ids
+    else:
+        target = round_id if round_id else (finished_ids[-1] if finished_ids else None)
+        status = next((r.get("status") for r in store.rounds if r.get("id") == target), None)
+        if target is None or status != "complete":
+            label = f"GW {target}" if target else "This gameweek"
+            return jsonify({"pending": True, "round_id": target,
+                            "message": f"{label} awards unlock once the gameweek is complete."})
+        round_ids = [target]
+
+    try:
+        managers = fetch_league(league_id, cookie)
+        owner_maps = {rid: get_owner_map(league_id, rid, cookie, managers) for rid in round_ids}
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    pids = set()
+    for om in owner_maps.values():
+        pids.update(om.keys())
+    stats_map = get_player_stats_map(pids)
+    # (pid, rid) → stat dict for O(1) slicing.
+    stats_by_round = {}
+    for pid, recs in stats_map.items():
+        for rec in recs or []:
+            stats_by_round[(pid, rec.get("roundId"))] = rec.get("stats") or {}
+
+    names = sorted({m.get("userName", f"User{m.get('userId')}") for m in managers})
+
+    # name → bucket → {"points", "count"} ; name → bucket → pid → player detail
+    agg = {nm: {} for nm in names}
+    detail = {nm: {} for nm in names}
+
+    def _played(pid, rid):
+        return ((stats_by_round.get((pid, rid)) or {}).get("MP", 0) or 0) > 0
+
+    for rid, owner_map in owner_maps.items():
+        # Effective double pick per manager: the captain, or the vice-captain if
+        # the captain didn't play a minute (mirrors FIFA's vice-captain rule).
+        cap_pid, vice_pid = {}, {}
+        for pid, owners in owner_map.items():
+            for o in owners:
+                if o.get("is_captain"):
+                    cap_pid[o["name"]] = pid
+                if o.get("is_vice"):
+                    vice_pid[o["name"]] = pid
+        double_pid = {}
+        for nm, cpid in cap_pid.items():
+            if _played(cpid, rid) or nm not in vice_pid:
+                double_pid[nm] = cpid
+            else:
+                double_pid[nm] = vice_pid[nm]
+
+        for pid, owners in owner_map.items():
+            s = stats_by_round.get((pid, rid))
+            if not s:
+                continue
+            pos = store.player(pid).get("position", "?")
+            bd = award_breakdown(pos, s)
+            if not bd:
+                continue
+            for o in owners:
+                nm = o["name"]
+                cap = (double_pid.get(nm) == pid)
+                mult = 2 if cap else 1
+                for bk, (pts, cnt) in bd.items():
+                    a = agg.setdefault(nm, {}).setdefault(bk, {"points": 0.0, "count": 0})
+                    a["points"] += pts * mult
+                    a["count"] += cnt
+                    dbucket = detail.setdefault(nm, {}).setdefault(bk, {})
+                    d = dbucket.get(pid)
+                    if d is None:
+                        d = dbucket[pid] = {
+                            "name": store.player_name(pid),
+                            "pos": pos,
+                            "country": store.squad_abbr(store.player(pid).get("squadId")),
+                            "points": 0.0,
+                            "count": 0,
+                            "cap": False,
+                        }
+                    d["points"] += pts * mult
+                    d["count"] += cnt
+                    d["cap"] = d["cap"] or cap
+
+    categories = []
+    for key, title, subtitle, unit, emoji, by_count in _AWARDS:
+        rows = []
+        for nm in names:
+            st = agg.get(nm, {}).get(key)
+            pts = round(st["points"], 1) if st else 0.0
+            cnt = st["count"] if st else 0
+            players = list(detail.get(nm, {}).get(key, {}).values())
+            for p in players:
+                p["points"] = round(p["points"], 1)
+            players.sort(key=lambda x: (-abs(x["points"]), -x["count"], x["name"].lower()))
+            rows.append({"name": nm, "points": pts, "count": cnt, "players": players[:6]})
+        if by_count:  # discipline: most offences first
+            rows.sort(key=lambda r: (-r["count"], r["points"], r["name"].lower()))
+        else:
+            rows.sort(key=lambda r: (-r["points"], -r["count"], r["name"].lower()))
+        categories.append({
+            "key": key, "title": title, "subtitle": subtitle,
+            "unit": unit, "emoji": emoji, "by_count": by_count,
+            "ranking": rows,
+        })
+
+    return jsonify({
+        "categories": categories,
         "total_managers": len(managers),
         "overall": overall,
         "rounds_counted": len(round_ids),
